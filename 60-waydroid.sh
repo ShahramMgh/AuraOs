@@ -152,6 +152,26 @@ set_props() {
 }
 if [ -f "$MARKER" ]; then set_props; exit 0; fi
 
+# Second chance for the package: if the build chroot had no network, the
+# waydroid package never got baked in. First *online* boot is where we recover —
+# install it now (this service Wants=network-online.target), so "Android by
+# default" holds even for an image built offline.
+if ! command -v waydroid >/dev/null 2>&1; then
+  echo "Aura: Waydroid not installed — installing it now (first online boot)…"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update || true
+  apt-get install -y --no-install-recommends curl ca-certificates lxc || true
+  if curl -fsSL https://repo.waydro.id | bash; then
+    apt-get install -y --no-install-recommends waydroid || true
+  fi
+fi
+if ! command -v waydroid >/dev/null 2>&1; then
+  echo "Aura: Waydroid still unavailable (offline?). Will retry next boot." >&2
+  exit 1
+fi
+# Bring up the (possibly just-installed) container manager before init.
+systemctl enable --now waydroid-container.service 2>/dev/null || true
+
 # ensure binder is present before init
 modprobe binder_linux 2>/dev/null || true
 
