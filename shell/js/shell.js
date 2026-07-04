@@ -458,39 +458,57 @@
       tile.addEventListener('pointerdown', e => {
         if (e.button) return;
         if (!S.homeEdit) return;   // drag-to-arrange only in edit mode; else swipe pages freely
-        const start = { x: e.clientX, y: e.clientY }; let started = false;
+        const start = { x: e.clientX, y: e.clientY }; let started = false, lastEdge = 0;
         const move = ev => {
           const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
           if (!started) {
             if (Math.hypot(dx, dy) < 9) return;      // still a tap
             started = true;
-            tile.classList.add('dragging'); grid.classList.add('sorting');
+            tile.classList.add('dragging');
+            $$('#homePager .tile-grid').forEach(g => g.classList.add('sorting'));
             try { tile.setPointerCapture(ev.pointerId); } catch (_) {}
           }
           tile.style.transform = `translate(${dx}px,${dy}px) scale(1.08)`;
+          // near a page edge → glide to the adjacent page so you can drop there
+          const pager = $('#homePager');
+          if (pager) {
+            const pr = pager.getBoundingClientRect(), now = Date.now();
+            if (now - lastEdge > 550) {
+              if (ev.clientX < pr.left + 34) { pager.scrollBy({ left: -pager.clientWidth, behavior: 'smooth' }); lastEdge = now; }
+              else if (ev.clientX > pr.right - 34) { pager.scrollBy({ left: pager.clientWidth, behavior: 'smooth' }); lastEdge = now; }
+            }
+          }
           tile.style.pointerEvents = 'none';
           const under = document.elementFromPoint(ev.clientX, ev.clientY);
           tile.style.pointerEvents = '';
-          const over = under && under.closest('.tile');
-          if (over && over !== tile && over.parentElement === grid) {
-            const r = over.getBoundingClientRect();
+          const overTile = under && under.closest('.tile');
+          const overGrid = under && under.closest('.tile-grid');
+          if (overTile && overTile !== tile) {                       // reorder / cross-page insert
+            const g = overTile.parentElement, r = overTile.getBoundingClientRect();
             const after = ev.clientY > r.top + r.height / 2 || ev.clientX > r.left + r.width / 2;
-            flipReorder(grid, () => grid.insertBefore(tile, after ? over.nextSibling : over));
-            tile.style.transform = `translate(${dx}px,${dy}px) scale(1.08)`;  // keep following
+            flipReorder(g, () => g.insertBefore(tile, after ? overTile.nextSibling : overTile));
+            tile.style.transform = `translate(${dx}px,${dy}px) scale(1.08)`;
+          } else if (overGrid && overGrid !== tile.parentElement) {   // move to another page's empty area
+            flipReorder(overGrid, () => overGrid.appendChild(tile));
+            tile.style.transform = `translate(${dx}px,${dy}px) scale(1.08)`;
           }
         };
         const up = () => {
           tile.removeEventListener('pointermove', move);
           window.removeEventListener('pointerup', up);
           if (!started) return;
-          tile.classList.remove('dragging'); grid.classList.remove('sorting');
+          tile.classList.remove('dragging');
+          $$('#homePager .tile-grid').forEach(g => g.classList.remove('sorting'));
           tile.style.transition = 'transform .18s var(--ease)';
           tile.style.transform = '';
           setTimeout(() => { tile.style.transition = ''; }, 200);
-          const order = [...grid.querySelectorAll('.tile')].map(t => t.dataset.launch);
-          const pi = parseInt(grid.dataset.page, 10);
-          if (!isNaN(pi)) { const pgs = homePagesIds().slice(); pgs[pi] = order; PREF.set('homePages', pgs); }
-          else PREF.set('homeApps', order);
+          // persist every page (a drag may have moved the tile across pages)
+          const pgs = homePagesIds().slice();
+          $$('#homePager .tile-grid').forEach(g => {
+            const pi = parseInt(g.dataset.page, 10);
+            if (!isNaN(pi)) pgs[pi] = [...g.querySelectorAll('.tile')].map(t => t.dataset.launch);
+          });
+          PREF.set('homePages', pgs);
           suppressClick = true; setTimeout(() => { suppressClick = false; }, 80);
         };
         tile.addEventListener('pointermove', move);
