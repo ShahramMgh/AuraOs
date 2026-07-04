@@ -1,5 +1,7 @@
 <div align="center">
 
+<img width="476" height="904" alt="image" src="https://github.com/user-attachments/assets/35fb033d-d0f4-44cf-8a6e-88a5b8307466" />
+
 # AuraOS
 
 **A privacy-first mobile Linux OS for the Raspberry Pi 5 — with its own
