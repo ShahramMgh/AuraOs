@@ -3163,12 +3163,12 @@
   // Each catalog app has an in-phone view (it runs INSIDE the phone — never a
   // desktop app on the host). Browser is a real iframe, Camera a real webcam,
   // Maps a real OSM embed; the rest are functional in-phone experiences.
-  let _camStream = null, _musicTimer = null, _phTimer = null, _msTimer = null, _phNum = '';
+  let _camStream = null, _musicTimer = null, _phTimer = null, _msTimer = null, _phNum = '', _audio = null;
   const APP_VIEWS = {
     browser:  { render: browserView,  wire: wireBrowser },
     camera:   { render: cameraView,   wire: wireCamera,  close: stopCam },
     maps:     { render: mapsView },
-    music:    { render: musicView,    wire: wireMusic,   close: () => clearInterval(_musicTimer) },
+    music:    { render: musicView,    wire: wireMusic,   close: () => { clearInterval(_musicTimer); if (_audio) { try { _audio.pause(); } catch (e) {} _audio = null; } } },
     phone:    { render: phoneView,    wire: wirePhone,     close: () => clearInterval(_phTimer) },
     messages: { render: messagesView, wire: wireMessages,  close: () => clearInterval(_msTimer) },
     contacts: { render: contactsView, wire: wireContacts },
@@ -3307,28 +3307,70 @@
     { title: 'Quiet Cores', artist: 'Aura', len: 168, col: '#2BA869' },
   ];
   const muDur = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  const MU_COLS = ['#1B82A8', '#5A3AD6', '#C0392B', '#2BA869', '#C8A020', '#1B9AA8'];
   let _mu = { i: 0, pos: 0, playing: false };
-  function musicView() {
-    const t = MUSIC[0];
-    return `
-      <div class="mu-art" id="muArt" style="--c:${t.col}">${ic('music',52)}</div>
-      <div class="mu-title" id="muTitle">${esc(t.title)}</div>
-      <div class="mu-artist" id="muArtist">${esc(t.artist)}</div>
+  function musicView() { return `<div class="mu-wrap" id="muWrap"></div>`; }
+  async function wireMusic() {
+    const wrap = $('#muWrap'); if (!wrap) return;
+    const r = await Sov.music();
+    const tracks = (r && r.items) || [];
+    if (!tracks.length) return wireMusicDemo(wrap);   // no ~/Music files → demo player
+    const fmt = s => isFinite(s) ? Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0') : '0:00';
+    let i = 0;
+    wrap.innerHTML = `
+      <audio id="muAudio"></audio>
+      <div class="mu-art" id="muArt">${ic('music',52)}</div>
+      <div class="mu-title" id="muTitle"></div>
+      <div class="mu-artist">${tracks.length} track${tracks.length > 1 ? 's' : ''} · your library</div>
+      <div class="mu-seek" id="muSeek"><div class="mu-fill" id="muFill"></div></div>
+      <div class="mu-time"><span id="muCur">0:00</span><span id="muLen">0:00</span></div>
+      <div class="mu-ctrls">
+        <button class="mu-btn" id="muPrev">${ic('back',20)}</button>
+        <button class="mu-play" id="muPlay">${ic('play',24)}</button>
+        <button class="mu-btn" id="muNext" style="transform:scaleX(-1)">${ic('back',20)}</button>
+      </div>
+      <div class="mu-list" id="muList">${tracks.map((t, ix) => `<button class="mu-row" data-tr="${ix}"><span class="mu-dot" style="background:${MU_COLS[ix % MU_COLS.length]}"></span><span class="mu-rt">${esc(t.name)}</span></button>`).join('')}</div>`;
+    const audio = $('#muAudio'); _audio = audio;
+    const load = (ix, play) => {
+      i = ix; audio.src = Sov.audioUrl(tracks[i].rel);
+      $('#muTitle').textContent = tracks[i].name;
+      $('#muArt').style.setProperty('--c', MU_COLS[i % MU_COLS.length]);
+      $$('#muList [data-tr]').forEach(b => b.classList.toggle('on', +b.dataset.tr === i));
+      if (play) audio.play().catch(() => {});
+    };
+    audio.ontimeupdate = () => {
+      $('#muCur').textContent = fmt(audio.currentTime);
+      if (audio.duration) { $('#muLen').textContent = fmt(audio.duration); $('#muFill').style.width = (audio.currentTime / audio.duration * 100) + '%'; }
+    };
+    audio.onended = () => load((i + 1) % tracks.length, true);
+    audio.onplay = () => { $('#muPlay').innerHTML = ic('stop', 24); };
+    audio.onpause = () => { $('#muPlay').innerHTML = ic('play', 24); };
+    $('#muPlay').onclick = () => { if (audio.paused) audio.play().catch(() => {}); else audio.pause(); };
+    $('#muPrev').onclick = () => load((i - 1 + tracks.length) % tracks.length, true);
+    $('#muNext').onclick = () => load((i + 1) % tracks.length, true);
+    $('#muSeek').onclick = e => { if (audio.duration) { const b = e.currentTarget.getBoundingClientRect(); audio.currentTime = (e.clientX - b.left) / b.width * audio.duration; } };
+    $$('#muList [data-tr]').forEach(b => b.onclick = () => load(+b.dataset.tr, true));
+    load(0, false);
+  }
+  // Demo player (no real files present) — the simulated library, still explorable.
+  function wireMusicDemo(wrap) {
+    _mu = { i: 0, pos: 0, playing: false };
+    wrap.innerHTML = `
+      <div class="mu-art" id="muArt" style="--c:${MUSIC[0].col}">${ic('music',52)}</div>
+      <div class="mu-title" id="muTitle">${esc(MUSIC[0].title)}</div>
+      <div class="mu-artist" id="muArtist">${esc(MUSIC[0].artist)} · demo</div>
       <div class="mu-seek"><div class="mu-fill" id="muFill"></div></div>
-      <div class="mu-time"><span id="muCur">0:00</span><span id="muLen">${muDur(t.len)}</span></div>
+      <div class="mu-time"><span id="muCur">0:00</span><span id="muLen">${muDur(MUSIC[0].len)}</span></div>
       <div class="mu-ctrls">
         <button class="mu-btn" id="muPrev">${ic('back',20)}</button>
         <button class="mu-play" id="muPlay">${ic('play',24)}</button>
         <button class="mu-btn" id="muNext" style="transform:scaleX(-1)">${ic('back',20)}</button>
       </div>
       <div class="mu-list" id="muList">${MUSIC.map((m, i) => `<button class="mu-row" data-tr="${i}"><span class="mu-dot" style="background:${m.col}"></span><span class="mu-rt">${esc(m.title)}</span><span class="mu-rl">${muDur(m.len)}</span></button>`).join('')}</div>`;
-  }
-  function wireMusic() {
-    _mu = { i: 0, pos: 0, playing: false };
     const paint = () => {
       const t = MUSIC[_mu.i];
       $('#muArt').style.setProperty('--c', t.col);
-      $('#muTitle').textContent = t.title; $('#muArtist').textContent = t.artist;
+      $('#muTitle').textContent = t.title; $('#muArtist').textContent = t.artist + ' · demo';
       $('#muLen').textContent = muDur(t.len); $('#muCur').textContent = muDur(Math.floor(_mu.pos));
       $('#muFill').style.width = (_mu.pos / t.len * 100) + '%';
       $('#muPlay').innerHTML = ic(_mu.playing ? 'stop' : 'play', 24);
@@ -3432,31 +3474,74 @@
     clearInterval(_msTimer); _msTimer = setInterval(() => { if (S.appOpen === 'messages') render(); }, 5000);
   }
 
-  /* ---- Contacts — a list --------------------------------------------------- */
-  const CONTACTS = ['Ada Lovelace','Alan Turing','Grace Hopper','Linus Torvalds','Margaret Hamilton','Dennis Ritchie','Radia Perlman','Ken Thompson'];
-  function contactsView() {
-    return `<div class="ct-list">${CONTACTS.map(n => {
-      const initials = n.split(' ').map(w => w[0]).join('');
-      return `<div class="ct-row"><span class="ct-av">${initials}</span><span class="ct-name">${esc(n)}</span><span class="ct-call">${ic('phone',15)}</span></div>`;
-    }).join('')}</div>`;
+  /* ---- Contacts — a real, editable local store ---------------------------- */
+  const CT_COLS = ['#1B82A8', '#5A3AD6', '#C0392B', '#2BA869', '#C8A020', '#1B9AA8', '#7A5AD6', '#D6772E'];
+  function contactsView() { return `<div class="ct-wrap" id="ctWrap"></div>`; }
+  async function wireContacts() {
+    const wrap = $('#ctWrap'); if (!wrap) return;
+    const render = async () => {
+      const list = (await Sov.contacts.list()).slice().sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      wrap.innerHTML = `
+        <div class="ct-list">${list.length ? list.map((c, ix) => {
+          const initials = (c.name || '?').trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase();
+          return `<div class="ct-row" data-id="${c.id}">
+            <span class="ct-av" style="background:linear-gradient(140deg, ${CT_COLS[ix % CT_COLS.length]}, ${CT_COLS[(ix + 4) % CT_COLS.length]})">${esc(initials || '?')}</span>
+            <span class="ct-info"><span class="ct-name">${esc(c.name || '—')}</span><span class="ct-num">${esc(c.number || '')}</span></span>
+            <span class="ct-call" data-callid="${c.id}">${ic('phone',15)}</span></div>`;
+        }).join('') : '<div class="ct-empty">No contacts yet — tap + to add one.</div>'}</div>
+        <button class="ct-add" id="ctAdd" aria-label="Add contact">${ic('x',22)}</button>`;
+      $$('#ctWrap [data-callid]').forEach(b => b.onclick = e => {
+        e.stopPropagation();
+        const c = list.find(x => x.id === b.dataset.callid); if (!c) return;
+        Sov.phone.dial(c.number); toast('Calling ' + (c.name || c.number) + '…', '', 'phone');
+      });
+      $$('#ctWrap .ct-row').forEach(r => r.onclick = () => editContact(list.find(x => x.id === r.dataset.id), render));
+      $('#ctAdd').onclick = () => editContact(null, render);
+    };
+    await render();
   }
-  function wireContacts() {
-    $$('#afView .ct-row').forEach(r => r.querySelector('.ct-call').onclick =
-      () => toast('Calling ' + r.querySelector('.ct-name').textContent + '…', '', 'phone'));
+  function editContact(c, done) {
+    const scrim = $('#promptScrim');
+    scrim.innerHTML = `<div class="prompt-card ct-edit">
+      <div class="pc-title">${c ? 'Edit contact' : 'New contact'}</div>
+      <input id="ceName" class="modal-input" placeholder="Name" value="${c ? esc(c.name || '') : ''}">
+      <input id="ceNum" class="modal-input" placeholder="Number" value="${c ? esc(c.number || '') : ''}" style="margin-top:8px">
+      <div class="ce-btns">${c ? `<button class="pbtn deny" id="ceDel">Delete</button>` : ''}<button class="pbtn allow" id="ceSave">Save</button></div>
+    </div>`;
+    scrim.classList.add('open');
+    const close = () => { scrim.classList.remove('open'); setTimeout(() => { if (!scrim.classList.contains('open')) scrim.innerHTML = ''; }, 200); };
+    ['ceName', 'ceNum'].forEach(id => { const el = $('#' + id); if (el) el.onkeydown = e => e.stopPropagation(); });
+    $('#ceSave').onclick = async () => {
+      const name = ($('#ceName').value || '').trim(), number = ($('#ceNum').value || '').trim();
+      if (!name && !number) { close(); return; }
+      await Sov.contacts.op(c ? 'update' : 'add', { id: c && c.id, name, number });
+      close(); done();
+    };
+    const del = $('#ceDel'); if (del) del.onclick = async () => { await Sov.contacts.op('delete', { id: c.id }); close(); done(); };
   }
 
-  /* ---- Photos — a gallery -------------------------------------------------- */
-  function photosView() {
-    const cols = ['#1B82A8','#5A3AD6','#C0392B','#2BA869','#C8A020','#1B9AA8','#2E7FD6','#7A5AD6','#D6772E','#3A4A5A','#1B6E5A','#8896A6'];
-    const tiles = cols.map((c, i) => `<button class="pg-tile" data-i="${i}" style="background:linear-gradient(135deg, ${c}, ${c}66)"></button>`).join('');
-    return `<div class="pg-grid">${tiles}</div><div class="pg-view" id="pgView"></div>`;
-  }
-  function wirePhotos() {
-    const view = $('#pgView');
-    $$('#afView .pg-tile').forEach(t => t.onclick = () => {
-      view.style.background = t.style.background; view.classList.add('show');
-      view.onclick = () => view.classList.remove('show');
-    });
+  /* ---- Photos — a modern gallery of your real ~/Pictures ------------------ */
+  function photosView() { return `<div class="pg-wrap" id="pgWrap"></div>`; }
+  async function wirePhotos() {
+    const wrap = $('#pgWrap'); if (!wrap) return;
+    const r = await Sov.photos();
+    const items = (r && r.items) || [];
+    if (items.length) {
+      wrap.innerHTML = `
+        <div class="pg-head">${items.length} photo${items.length > 1 ? 's' : ''}</div>
+        <div class="pg-grid">${items.map((it, i) => `<button class="pg-tile" data-i="${i}"><img loading="lazy" src="${Sov.photoUrl(it.rel)}" alt="${esc(it.name)}"></button>`).join('')}</div>
+        <div class="pg-view" id="pgView"><button class="pg-close" id="pgClose">${ic('x',20)}</button><img id="pgImg" alt=""></div>`;
+      const view = $('#pgView'), img = $('#pgImg');
+      $$('#pgWrap .pg-tile').forEach(t => t.onclick = () => { img.src = Sov.photoUrl(items[+t.dataset.i].rel); view.classList.add('show'); });
+      $('#pgClose').onclick = () => view.classList.remove('show');
+    } else {
+      const cols = ['#1B82A8', '#5A3AD6', '#C0392B', '#2BA869', '#C8A020', '#1B9AA8', '#2E7FD6', '#7A5AD6', '#D6772E'];
+      wrap.innerHTML = `
+        <div class="pg-empty"><div class="pg-empty-ic">${ic('photo',30)}</div>
+          <div class="pg-empty-h">Your photos live here</div>
+          <div class="pg-empty-s">Add images to <b>~/Pictures</b> on the device and they appear in this gallery.</div></div>
+        <div class="pg-grid demo">${cols.map(c => `<div class="pg-tile" style="background:linear-gradient(135deg, ${c}, ${c}55)"></div>`).join('')}</div>`;
+    }
   }
 
   /* ======================================================================

@@ -251,6 +251,13 @@ const Sov = (() => {
       { id: 's2', number: '+1 555 0173', text: 'Thanks for the update!', sent: true, unread: false, time: '' },
     ],
   };
+  // Contacts sim store (editable) — live mode uses the agent's persisted store.
+  let simContacts = [
+    { id: 'c1', name: 'Ada Lovelace', number: '+1 555 0110' },
+    { id: 'c2', name: 'Alan Turing', number: '+1 555 0127' },
+    { id: 'c3', name: 'Grace Hopper', number: '+1 555 0143' },
+    { id: 'c4', name: 'Linus Torvalds', number: '+1 555 0168' },
+  ];
 
   const api = {
     onUpdate(fn) { listeners.add(fn); return () => listeners.delete(fn); },
@@ -600,6 +607,40 @@ const Sov = (() => {
     appIconUrl(id) {
       if (mode !== 'live' || !TOKEN) return null;
       return AGENT + '/api/appicon?id=' + encodeURIComponent(id) + '&t=' + encodeURIComponent(TOKEN);
+    },
+
+    /* ---- Media (Photos ~/Pictures, Music ~/Music) + Contacts ---------------
+       Live reads real files from the device via the agent; the token rides the
+       URL so <img>/<audio> load. In sim we return null lists so the apps show
+       their designed empty/demo state. */
+    async photos() {
+      if (mode === 'live') { const r = await getJSON('/api/photos'); if (r) return r; }
+      return { available: false, items: [], sim: true };
+    },
+    photoUrl(rel) {
+      if (mode !== 'live' || !TOKEN) return null;
+      return AGENT + '/api/photo?rel=' + encodeURIComponent(rel) + '&t=' + encodeURIComponent(TOKEN);
+    },
+    async music() {
+      if (mode === 'live') { const r = await getJSON('/api/music'); if (r) return r; }
+      return { available: false, items: [], sim: true };
+    },
+    audioUrl(rel) {
+      if (mode !== 'live' || !TOKEN) return null;
+      return AGENT + '/api/audio?rel=' + encodeURIComponent(rel) + '&t=' + encodeURIComponent(TOKEN);
+    },
+    contacts: {
+      async list() {
+        if (mode === 'live') { const r = await getJSON('/api/contacts'); if (r) return r.contacts || []; }
+        return simContacts.map(c => ({ ...c }));
+      },
+      async op(action, contact) {
+        if (mode === 'live') { const r = await post('/api/contacts', { action, contact }, 8000, 1); return (r && r.contacts) || []; }
+        if (action === 'add') simContacts.push({ id: 'c' + Date.now(), name: contact.name || '', number: contact.number || '' });
+        else if (action === 'update') { const x = simContacts.find(s => s.id === contact.id); if (x) { x.name = contact.name; x.number = contact.number; } }
+        else if (action === 'delete') simContacts = simContacts.filter(s => s.id !== contact.id);
+        return simContacts.map(c => ({ ...c }));
+      },
     },
 
     /* ---- Notes — a native app backed by real files on the device --------- */

@@ -447,6 +447,83 @@ def run_exec(cmd, cwd):
 HOME = os.path.expanduser("~")
 FM_TEXT_MAX = 256 * 1024     # only preview files up to 256 KB
 
+# ── Media (Photos ~/Pictures, Music ~/Music) + a local Contacts store ────────
+PICTURES = os.path.join(HOME, "Pictures")
+MUSIC_DIR = os.path.join(HOME, "Music")
+CONTACTS_FILE = os.path.join(STATE_DIR, "contacts.json")
+IMG_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic")
+AUD_EXTS = (".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".flac", ".wav", ".wma")
+_MEDIA_CTYPE = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".gif": "image/gif",
+    ".webp": "image/webp", ".bmp": "image/bmp", ".heic": "image/heic",
+    ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".ogg": "audio/ogg",
+    ".oga": "audio/ogg", ".opus": "audio/ogg", ".flac": "audio/flac", ".wav": "audio/wav",
+    ".wma": "audio/x-ms-wma",
+}
+
+
+def media_list(base, exts):
+    """List media files under a base dir as [{name, rel}] (rel is traversal-safe)."""
+    if not os.path.isdir(base):
+        return {"available": False, "dir": base, "items": []}
+    out = []
+    try:
+        for root, _dirs, files in os.walk(base):
+            for f in sorted(files):
+                if f.lower().endswith(exts):
+                    out.append({"name": os.path.splitext(f)[0],
+                                "rel": os.path.relpath(os.path.join(root, f), base)})
+            if len(out) >= 500:
+                break
+    except Exception:
+        pass
+    return {"available": True, "dir": base, "items": out[:500]}
+
+
+def media_resolve(base, rel):
+    """Resolve rel under base, guarded against path traversal. abspath or None."""
+    if not rel:
+        return None
+    root = os.path.realpath(base)
+    full = os.path.realpath(os.path.join(root, rel))
+    if full != root and not full.startswith(root + os.sep):
+        return None
+    return full if os.path.isfile(full) else None
+
+
+def contacts_load():
+    try:
+        with open(CONTACTS_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def contacts_save(lst):
+    tmp = CONTACTS_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(lst, f, indent=2)
+    os.replace(tmp, CONTACTS_FILE)
+
+
+def contacts_op(body):
+    action = body.get("action")
+    lst = contacts_load()
+    c = body.get("contact") or {}
+    if action == "add":
+        cid = c.get("id") or ("c" + secrets.token_hex(4))
+        lst.append({"id": cid, "name": c.get("name", ""), "number": c.get("number", "")})
+    elif action == "update":
+        for x in lst:
+            if x.get("id") == c.get("id"):
+                x["name"], x["number"] = c.get("name", x.get("name")), c.get("number", x.get("number"))
+    elif action == "delete":
+        lst = [x for x in lst if x.get("id") != c.get("id")]
+    else:
+        return {"ok": False, "error": "unknown action"}
+    contacts_save(lst)
+    return {"ok": True, "contacts": lst}
+
 
 def _fm_resolve(path):
     """Resolve a request path to an absolute path, defaulting to HOME."""
@@ -1026,6 +1103,18 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return self._send(404, {"error": "no icon"})
 
+    def _serve_media(self, base, rel):
+        """Serve a photo/audio file's bytes (token-gated, traversal-guarded)."""
+        full = media_resolve(base, rel)
+        if not full:
+            return self._send(404, {"error": "not found"})
+        ctype = _MEDIA_CTYPE.get(os.path.splitext(full)[1].lower(), "application/octet-stream")
+        try:
+            with open(full, "rb") as f:
+                return self._send(200, f.read(), ctype)
+        except Exception:
+            return self._send(404, {"error": "read failed"})
+
     # -------- static shell --------
     def _serve_static(self, path):
         if path == "/" or path == "":
@@ -1135,6 +1224,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, MODEM.sms_list())
         if p == "/api/location":
             return self._send(200, MODEM.location())
+        # ---- Media (Photos / Music) + Contacts ----
+        if p == "/api/photos":
+            return self._send(200, media_list(PICTURES, IMG_EXTS))
+        if p == "/api/photo":
+            q = parse_qs(urlsplit(self.path).query)
+            return self._serve_media(PICTURES, q.get("rel", [""])[0])
+        if p == "/api/music":
+            return self._send(200, media_list(MUSIC_DIR, AUD_EXTS))
+        if p == "/api/audio":
+            q = parse_qs(urlsplit(self.path).query)
+            return self._serve_media(MUSIC_DIR, q.get("rel", [""])[0])
+        if p == "/api/contacts":
+            return self._send(200, {"contacts": contacts_load()})
         return self._serve_static(p)
 
     def _vault_used(self):
@@ -1342,6 +1444,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, MODEM.hangup())
         if p == "/api/sms/send":
             return self._send(200, MODEM.sms_send(body.get("number", ""), body.get("text", "")))
+        if p == "/api/contacts":
+            return self._send(200, contacts_op(body))
 
         return self._send(404, {"error": "unknown endpoint"})
 
