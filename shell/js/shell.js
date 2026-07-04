@@ -3196,7 +3196,7 @@
     { title: 'Night Light', artist: 'Aura', len: 241, col: '#C0392B' },
     { title: 'Quiet Cores', artist: 'Aura', len: 168, col: '#2BA869' },
   ];
-  const fmtDur = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  const muDur = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   let _mu = { i: 0, pos: 0, playing: false };
   function musicView() {
     const t = MUSIC[0];
@@ -3205,13 +3205,13 @@
       <div class="mu-title" id="muTitle">${esc(t.title)}</div>
       <div class="mu-artist" id="muArtist">${esc(t.artist)}</div>
       <div class="mu-seek"><div class="mu-fill" id="muFill"></div></div>
-      <div class="mu-time"><span id="muCur">0:00</span><span id="muLen">${fmtDur(t.len)}</span></div>
+      <div class="mu-time"><span id="muCur">0:00</span><span id="muLen">${muDur(t.len)}</span></div>
       <div class="mu-ctrls">
         <button class="mu-btn" id="muPrev">${ic('back',20)}</button>
         <button class="mu-play" id="muPlay">${ic('play',24)}</button>
         <button class="mu-btn" id="muNext" style="transform:scaleX(-1)">${ic('back',20)}</button>
       </div>
-      <div class="mu-list" id="muList">${MUSIC.map((m, i) => `<button class="mu-row" data-tr="${i}"><span class="mu-dot" style="background:${m.col}"></span><span class="mu-rt">${esc(m.title)}</span><span class="mu-rl">${fmtDur(m.len)}</span></button>`).join('')}</div>`;
+      <div class="mu-list" id="muList">${MUSIC.map((m, i) => `<button class="mu-row" data-tr="${i}"><span class="mu-dot" style="background:${m.col}"></span><span class="mu-rt">${esc(m.title)}</span><span class="mu-rl">${muDur(m.len)}</span></button>`).join('')}</div>`;
   }
   function wireMusic() {
     _mu = { i: 0, pos: 0, playing: false };
@@ -3219,7 +3219,7 @@
       const t = MUSIC[_mu.i];
       $('#muArt').style.setProperty('--c', t.col);
       $('#muTitle').textContent = t.title; $('#muArtist').textContent = t.artist;
-      $('#muLen').textContent = fmtDur(t.len); $('#muCur').textContent = fmtDur(Math.floor(_mu.pos));
+      $('#muLen').textContent = muDur(t.len); $('#muCur').textContent = muDur(Math.floor(_mu.pos));
       $('#muFill').style.width = (_mu.pos / t.len * 100) + '%';
       $('#muPlay').innerHTML = ic(_mu.playing ? 'stop' : 'play', 24);
       $$('#muList [data-tr]').forEach(b => b.classList.toggle('on', +b.dataset.tr === _mu.i));
