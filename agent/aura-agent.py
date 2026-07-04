@@ -451,6 +451,7 @@ FM_TEXT_MAX = 256 * 1024     # only preview files up to 256 KB
 PICTURES = os.path.join(HOME, "Pictures")
 MUSIC_DIR = os.path.join(HOME, "Music")
 CONTACTS_FILE = os.path.join(STATE_DIR, "contacts.json")
+CALENDAR_FILE = os.path.join(STATE_DIR, "calendar.json")
 IMG_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic")
 AUD_EXTS = (".mp3", ".m4a", ".aac", ".ogg", ".oga", ".opus", ".flac", ".wav", ".wma")
 _MEDIA_CTYPE = {
@@ -541,6 +542,37 @@ def contacts_op(body):
         return {"ok": False, "error": "unknown action"}
     contacts_save(lst)
     return {"ok": True, "contacts": lst}
+
+
+def calendar_load():
+    try:
+        with open(CALENDAR_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def calendar_op(body):
+    action = body.get("action")
+    lst = calendar_load()
+    e = body.get("event") or {}
+    keys = ("title", "date", "time", "notes")
+    if action == "add":
+        eid = e.get("id") or ("e" + secrets.token_hex(4))
+        lst.append(dict({"id": eid}, **{k: e.get(k, "") for k in keys}))
+    elif action == "update":
+        for x in lst:
+            if x.get("id") == e.get("id"):
+                x.update({k: e.get(k, x.get(k, "")) for k in keys})
+    elif action == "delete":
+        lst = [x for x in lst if x.get("id") != e.get("id")]
+    else:
+        return {"ok": False, "error": "unknown action"}
+    tmp = CALENDAR_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(lst, f, indent=2)
+    os.replace(tmp, CALENDAR_FILE)
+    return {"ok": True, "events": lst}
 
 
 def _fm_resolve(path):
@@ -1255,6 +1287,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_media(MUSIC_DIR, q.get("rel", [""])[0])
         if p == "/api/contacts":
             return self._send(200, {"contacts": contacts_load()})
+        if p == "/api/calendar":
+            return self._send(200, {"events": calendar_load()})
         return self._serve_static(p)
 
     def _vault_used(self):
@@ -1464,6 +1498,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, MODEM.sms_send(body.get("number", ""), body.get("text", "")))
         if p == "/api/contacts":
             return self._send(200, contacts_op(body))
+        if p == "/api/calendar":
+            return self._send(200, calendar_op(body))
         if p == "/api/photo/save":
             return self._send(200, photo_save(body.get("data", "")))
 

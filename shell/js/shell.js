@@ -1563,6 +1563,82 @@
   }
 
   /* ======================================================================
+     CALENDAR — a real, on-device event store (month view + day agenda)
+     ====================================================================== */
+  let _calYM = null, _calSel = null;
+  async function renderCalendar() {
+    const id = 'calendar';
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const isoOf = (y, m, d) => `${y}-${pad(m + 1)}-${pad(d)}`;
+    const todayIso = isoOf(now.getFullYear(), now.getMonth(), now.getDate());
+    if (!_calYM) _calYM = { y: now.getFullYear(), m: now.getMonth() };
+    if (!_calSel) _calSel = todayIso;
+    $('#screenScroll').innerHTML = shead('Tools', 'Calendar') + loadingCard();
+    const events = await Sov.calendar.list();
+    if (!stillOn(id)) return;
+    const byDate = {};
+    events.forEach(e => { (byDate[e.date] = byDate[e.date] || []).push(e); });
+    Object.values(byDate).forEach(a => a.sort((x, z) => (x.time || '').localeCompare(z.time || '')));
+    const { y, m } = _calYM;
+    const first = new Date(y, m, 1), start = first.getDay(), days = new Date(y, m + 1, 0).getDate();
+    const monthName = first.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    let cells = '';
+    for (let i = 0; i < start; i++) cells += '<div class="cal-cell empty"></div>';
+    for (let d = 1; d <= days; d++) {
+      const ds = isoOf(y, m, d);
+      cells += `<button class="cal-cell ${ds === todayIso ? 'today' : ''} ${ds === _calSel ? 'sel' : ''}" data-day="${ds}">${d}${byDate[ds] ? '<span class="cal-dot"></span>' : ''}</button>`;
+    }
+    const dayEvents = byDate[_calSel] || [];
+    const dayLabel = new Date(_calSel + 'T00:00').toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+    $('#screenScroll').innerHTML = shead('Tools', 'Calendar', 'Your events, kept on the device.') + `
+      <div class="cal-head">
+        <button class="cal-nav" data-calnav="-1">${ic('back',16)}</button>
+        <span class="cal-month">${esc(monthName)}</span>
+        <button class="cal-nav" data-calnav="1" style="transform:scaleX(-1)">${ic('back',16)}</button></div>
+      <div class="cal-dow">${['S','M','T','W','T','F','S'].map(x => `<span>${x}</span>`).join('')}</div>
+      <div class="cal-grid">${cells}</div>
+      <div class="section-head"><span class="eyebrow">${esc(dayLabel)}</span>
+        <button class="act" id="calAdd">+ Add</button></div>
+      <div class="card">${dayEvents.length ? dayEvents.map(e => `
+        <div class="row cal-ev" data-ev="${e.id}"><span class="cal-time">${esc(e.time || '—')}</span>
+          <span class="rtext"><div class="rtitle">${esc(e.title || 'Untitled')}</div>${e.notes ? `<div class="rsub">${esc(e.notes)}</div>` : ''}</span></div>`).join('')
+        : '<div class="row muted">No events. Tap + to add one.</div>'}</div>
+      <div style="height:8px"></div>`;
+    $$('#screenScroll [data-day]').forEach(b => b.onclick = () => { _calSel = b.dataset.day; renderCalendar(); });
+    $$('#screenScroll [data-calnav]').forEach(b => b.onclick = () => {
+      const mm = _calYM.m + parseInt(b.dataset.calnav, 10);
+      _calYM = { y: _calYM.y + Math.floor(mm / 12), m: (mm % 12 + 12) % 12 };
+      renderCalendar();
+    });
+    $('#calAdd').onclick = () => editEvent(null, _calSel);
+    $$('#screenScroll .cal-ev').forEach(r => r.onclick = () => editEvent(events.find(e => e.id === r.dataset.ev)));
+  }
+  function editEvent(ev, date) {
+    const scrim = $('#promptScrim');
+    scrim.innerHTML = `<div class="prompt-card ct-edit">
+      <div class="pc-title">${ev ? 'Edit event' : 'New event'}</div>
+      <input id="evTitle" class="modal-input" placeholder="Title" value="${ev ? esc(ev.title || '') : ''}">
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <input id="evDate" class="modal-input" type="date" value="${ev ? esc(ev.date || '') : (date || '')}" style="flex:1">
+        <input id="evTime" class="modal-input" type="time" value="${ev ? esc(ev.time || '') : ''}" style="flex:1">
+      </div>
+      <input id="evNotes" class="modal-input" placeholder="Notes" value="${ev ? esc(ev.notes || '') : ''}" style="margin-top:8px">
+      <div class="ce-btns">${ev ? `<button class="pbtn deny" id="evDel">Delete</button>` : ''}<button class="pbtn allow" id="evSave">Save</button></div>
+    </div>`;
+    scrim.classList.add('open');
+    const close = () => { scrim.classList.remove('open'); setTimeout(() => { if (!scrim.classList.contains('open')) scrim.innerHTML = ''; }, 200); };
+    ['evTitle', 'evNotes'].forEach(i => { const el = $('#' + i); if (el) el.onkeydown = e => e.stopPropagation(); });
+    $('#evSave').onclick = async () => {
+      const event = { id: ev && ev.id, title: ($('#evTitle').value || '').trim(), date: $('#evDate').value, time: $('#evTime').value, notes: ($('#evNotes').value || '').trim() };
+      if (!event.title || !event.date) { toast('Title and date are required', 'alert', 'x'); return; }
+      _calSel = event.date;
+      await Sov.calendar.op(ev ? 'update' : 'add', event); close(); renderCalendar();
+    };
+    const del = $('#evDel'); if (del) del.onclick = async () => { await Sov.calendar.op('delete', { id: ev.id }); close(); renderCalendar(); };
+  }
+
+  /* ======================================================================
      APP STORE (in-shell F-Droid catalogue)
      A first-class store: browse/search a curated set of free/libre Android
      apps and install with one tap (the APK is resolved live from F-Droid and
@@ -3081,6 +3157,7 @@
     'sys-storage':  { render: renderStorage },
     'sys-android':  { render: renderAndroid },
     appstore:       { render: renderAppStore },
+    calendar:       { render: renderCalendar },
     'sys-wifi':     { render: renderWifi },
     'sys-bluetooth':{ render: renderBluetooth },
     'sys-display':  { render: renderDisplay },
@@ -3159,7 +3236,7 @@
   // sandboxed-app placeholder frame.
   const BUILTIN_SCREEN = { terminal: 'terminal', settings: 'settings', monitor: 'sys-monitor',
     assistant: 'assistant', files: 'files', clock: 'clock', notes: 'notes', calc: 'calc',
-    appstore: 'appstore' };
+    appstore: 'appstore', calendar: 'calendar' };
 
   async function launch(id) {
     if (S.homeEdit) return;          // in edit mode, taps rearrange — they don't launch

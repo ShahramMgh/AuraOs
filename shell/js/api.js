@@ -69,6 +69,7 @@ const Sov = (() => {
     { id: 'notes',    name: 'Notes',    glyph: 'note',    color: '#C8A020', cat: 'Tools' },
     { id: 'calc',     name: 'Calculator',glyph:'calc',    color: '#4A5A6A', cat: 'Tools' },
     { id: 'clock',    name: 'Clock',    glyph: 'clock',   color: '#2E7FD6', cat: 'Tools' },
+    { id: 'calendar', name: 'Calendar', glyph: 'calendar',color: '#C0392B', cat: 'Tools' },
     { id: 'terminal', name: 'Terminal', glyph: 'terminal',color: '#1B2D3A', cat: 'System', net: true },
     { id: 'sync',     name: 'Sync',     glyph: 'sync',    color: '#1B82A8', cat: 'System', net: true },
     { id: 'monitor',  name: 'System',   glyph: 'chart',   color: '#1B6E5A', cat: 'System' },
@@ -257,6 +258,13 @@ const Sov = (() => {
     { id: 'c2', name: 'Alan Turing', number: '+1 555 0127' },
     { id: 'c3', name: 'Grace Hopper', number: '+1 555 0143' },
     { id: 'c4', name: 'Linus Torvalds', number: '+1 555 0168' },
+  ];
+  // Calendar sim store (live mode uses the agent's persisted store).
+  const _today = new Date();
+  const _iso = d => d.toISOString().slice(0, 10);
+  let simCal = [
+    { id: 'e1', title: 'Team sync', date: _iso(_today), time: '10:00', notes: '' },
+    { id: 'e2', title: 'Flash the Pi image', date: _iso(new Date(_today.getTime() + 2 * 864e5)), time: '15:30', notes: '' },
   ];
 
   const api = {
@@ -644,6 +652,19 @@ const Sov = (() => {
         else if (action === 'update') { const x = simContacts.find(s => s.id === contact.id); if (x) { x.name = contact.name; x.number = contact.number; } }
         else if (action === 'delete') simContacts = simContacts.filter(s => s.id !== contact.id);
         return simContacts.map(c => ({ ...c }));
+      },
+    },
+    calendar: {
+      async list() {
+        if (mode === 'live') { const r = await getJSON('/api/calendar'); if (r) return r.events || []; }
+        return simCal.map(e => ({ ...e }));
+      },
+      async op(action, event) {
+        if (mode === 'live') { const r = await post('/api/calendar', { action, event }, 8000, 1); return (r && r.events) || []; }
+        if (action === 'add') simCal.push({ id: 'e' + Date.now(), title: event.title || '', date: event.date || '', time: event.time || '', notes: event.notes || '' });
+        else if (action === 'update') { const x = simCal.find(s => s.id === event.id); if (x) Object.assign(x, { title: event.title, date: event.date, time: event.time, notes: event.notes }); }
+        else if (action === 'delete') simCal = simCal.filter(s => s.id !== event.id);
+        return simCal.map(e => ({ ...e }));
       },
     },
 

@@ -59,6 +59,7 @@ const ICON = (() => {
     terminal:   `<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/>`,
     sync:       `<path d="M4 12a8 8 0 0 1 13-6l2 2M20 12a8 8 0 0 1-13 6l-2-2"/><path d="M17 4v4h-4M7 20v-4h4"/>`,
     clock:      `<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>`,
+    calendar:   `<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 3v4M16 3v4"/>`,
     eye:        `<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>`,
     trash:      `<path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13h10l1-13"/>`,
     info:       `<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h0"/>`,
