@@ -1,0 +1,35 @@
+AuraOS
+Copyright (C) 2026 Shahram Maghami and the AuraOS contributors
+
+This product includes software developed for the AuraOS project.
+
+  Original project: AuraOS
+  Original author:  Shahram Maghami (github.com/ShahramMgh)
+  Source:           https://github.com/ShahramMgh/AuraOs
+  Guiding document: AI-MANIFEST.md (the Native Intelligence Layer manifest)
+
+-------------------------------------------------------------------------------
+ATTRIBUTION REQUIREMENT
+-------------------------------------------------------------------------------
+This software is licensed under the GNU Affero General Public License v3.0
+(see LICENSE). In addition to the terms of that license, any distribution,
+fork, or derivative work — including a hosted/network service built from this
+code — MUST:
+
+  1. Preserve this NOTICE file and all copyright and license notices intact.
+  2. Cite the original project clearly and visibly in its documentation and,
+     where a user-facing "About" screen exists, in that screen: state that it
+     is built on AuraOS, with a link to the original source above.
+  3. State prominently what was changed relative to the original (AGPL §5).
+  4. Keep AI-MANIFEST.md (or a faithful, clearly-marked derivative of it)
+     alongside the code, so the philosophy the code enforces travels with it.
+
+-------------------------------------------------------------------------------
+NAME / TRADEMARK
+-------------------------------------------------------------------------------
+The AGPL covers the *code*. It does NOT grant any right to the *name*
+"AuraOS", its logo, or its branding. See TRADEMARK.md. In short: you are
+free to fork and ship the code (the license guarantees this), but a fork may
+not call itself "AuraOS" unless it is a faithful build consistent with
+AI-MANIFEST.md. This is how the project stays true to the original idea while
+keeping the code fully free.

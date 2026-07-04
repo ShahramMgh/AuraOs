@@ -1,0 +1,51 @@
+{
+  "version": 1,
+  "generatedBy": "default",
+  "updated": null,
+  "_note": "Home layout: the focus card + which apps are featured on the grid, in order. In Phase II the AI Engine rewrites this file from time of day and learned routine (AI-MANIFEST P13). Until then it is a hand-authored default. Nothing here grants access; it only arranges what the launcher shows. `clusters` and `links` are unused by the current home and kept only for forward-compatibility.",
+
+  "focus": "assistant",
+  "focusTag": null,
+  "greeting": null,
+
+  "ambient": {
+    "hue": 191,
+    "density": 1.0,
+    "motion": 1.0
+  },
+
+  "clusters": {
+    "core":    { "angle": 270 },
+    "comms":   { "angle": 205 },
+    "explore": { "angle": 330 },
+    "capture": { "angle": 70 },
+    "make":    { "angle": 135 }
+  },
+
+  "nodes": [
+    { "app": "assistant", "cluster": "core",    "weight": 1.5 },
+    { "app": "phone",     "cluster": "comms",   "weight": 1.0 },
+    { "app": "messages",  "cluster": "comms",   "weight": 0.95 },
+    { "app": "browser",   "cluster": "explore", "weight": 1.05 },
+    { "app": "maps",      "cluster": "explore", "weight": 0.9 },
+    { "app": "camera",    "cluster": "capture", "weight": 0.95 },
+    { "app": "photos",    "cluster": "capture", "weight": 0.85 },
+    { "app": "music",     "cluster": "capture", "weight": 0.8 },
+    { "app": "notes",     "cluster": "make",    "weight": 0.85 },
+    { "app": "files",     "cluster": "make",    "weight": 0.8 },
+    { "app": "settings",  "cluster": "make",    "weight": 0.7 }
+  ],
+
+  "links": [
+    ["assistant", "phone"],
+    ["assistant", "browser"],
+    ["assistant", "notes"],
+    ["assistant", "camera"],
+    ["phone", "messages"],
+    ["browser", "maps"],
+    ["camera", "photos"],
+    ["photos", "music"],
+    ["notes", "files"],
+    ["files", "settings"]
+  ]
+}

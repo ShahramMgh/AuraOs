@@ -1,0 +1,47 @@
+# AuraOS — build container
+#
+# Supports two use cases:
+#   1. Fast iteration: run the apt-based build scripts and verify they work
+#   2. Full image build: create a flashable .img.xz for Raspberry Pi 5
+#
+# For case 2, the container must be started with --privileged (set in
+# devcontainer.json "runArgs") so that losetup, mount, parted and cryptsetup
+# can work.  binfmt_misc is inherited from the host when privileged; if not
+# already registered on the host, the entrypoint script registers it.
+
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ─── BASE TOOLS ─────────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Script-iteration tools
+    sudo ca-certificates curl wget gnupg \
+    # Cross-arch rootfs builder
+    debootstrap \
+    # arm64 chroot on x86_64 host
+    qemu-user-static binfmt-support \
+    # Image partitioning
+    parted dosfstools e2fsprogs \
+    # LUKS2 full-disk encryption
+    cryptsetup cryptsetup-bin \
+    # Rootfs copy + image compress
+    rsync xz-utils \
+    # Loop device support
+    kpartx \
+    # Misc build utilities
+    util-linux fdisk file \
+  && rm -rf /var/lib/apt/lists/*
+
+# Register arm64 in binfmt_misc so arm64 chroots work on x86_64.
+# This runs at build time; it also runs again in the entrypoint to
+# handle cases where the container is restarted.
+RUN update-binfmts --enable qemu-aarch64 2>/dev/null || true
+
+# ─── ENTRYPOINT ─────────────────────────────────────────────────────────────
+# Re-register binfmt on every container start (survives restarts).
+COPY entrypoint.sh /usr/local/bin/aura-entrypoint.sh
+RUN chmod +x /usr/local/bin/aura-entrypoint.sh
+
+WORKDIR /workspace
+CMD ["/bin/bash"]

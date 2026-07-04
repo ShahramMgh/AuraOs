@@ -1,0 +1,1932 @@
+<title>AuraOS — Interactive Preview</title>
+<meta name="description" content="Interactive web OS preview of Aura, a privacy-first mobile Linux OS for Raspberry Pi 5.">
+
+<style>
+:root {
+  --bg: #060C12;
+  --s0: #08111C;
+  --s1: #0D1E2E;
+  --s2: #142336;
+  --s3: #1B2D42;
+  --s4: #243750;
+  --accent: #1B82A8;
+  --accent-hi: #29AADB;
+  --accent-lo: #0D4D66;
+  --text-1: #C4D9E6;
+  --text-2: #6A90A6;
+  --text-3: #2E4A5C;
+  --green: #2BA869;
+  --green-hi: #3DD886;
+  --green-bg: #0A2519;
+  --red: #C03333;
+  --red-hi: #E04444;
+  --red-bg: #2A0D0D;
+  --amber: #C87D0E;
+  --amber-hi: #F0A020;
+  --r-sm: 8px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-xl: 28px;
+  --font: 'Ubuntu', -apple-system, 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Ubuntu Mono', 'Menlo', 'Consolas', monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { height: 100%; }
+
+body {
+  background: var(--bg);
+  font-family: var(--font);
+  color: var(--text-1);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 16px 56px;
+  overflow-x: hidden;
+  position: relative;
+}
+
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: radial-gradient(circle, var(--text-3) 1px, transparent 1px);
+  background-size: 28px 28px;
+  opacity: 0.22;
+  pointer-events: none;
+  z-index: 0;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  top: -200px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 600px;
+  height: 600px;
+  background: radial-gradient(circle, rgba(27,130,168,0.07) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ─── PAGE HEADER ─── */
+.page-header {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 40px;
+}
+
+.brand-name {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+
+.brand-name em {
+  color: var(--accent-hi);
+  font-style: normal;
+}
+
+.brand-sub {
+  display: block;
+  font-size: 10px;
+  color: var(--text-3);
+  letter-spacing: 0.05em;
+  margin-top: 5px;
+  font-family: var(--font-mono);
+}
+
+.preview-badge {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--accent-lo);
+  padding: 4px 9px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+
+/* ─── DEVICE ─── */
+.device-wrapper {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+}
+
+.device-outer {
+  position: relative;
+  background: linear-gradient(155deg, #1C2C3C 0%, #0A1520 50%, #111E2C 100%);
+  border-radius: 42px;
+  padding: 14px;
+  box-shadow:
+    0 0 0 1px #080F18,
+    0 0 0 2px #1A2E40,
+    inset 0 1px 0 rgba(255,255,255,0.05),
+    inset 0 -1px 0 rgba(0,0,0,0.3),
+    0 40px 100px rgba(0,0,0,0.75),
+    0 12px 32px rgba(0,0,0,0.45),
+    0 0 60px rgba(27,130,168,0.04);
+}
+
+/* Right side button */
+.device-outer::before {
+  content: '';
+  position: absolute;
+  right: -4px;
+  top: 140px;
+  width: 4px;
+  height: 52px;
+  background: linear-gradient(to right, #1A2E3F, #243850);
+  border-radius: 0 3px 3px 0;
+}
+
+/* Left volume buttons */
+.device-outer::after {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: 110px;
+  width: 4px;
+  height: 36px;
+  background: linear-gradient(to left, #1A2E3F, #243850);
+  border-radius: 3px 0 0 3px;
+  box-shadow: 0 50px 0 #1A2E3F, 0 96px 0 #1A2E3F;
+}
+
+.power-led {
+  position: absolute;
+  top: 24px;
+  right: 26px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  animation: ledPulse 3s ease-in-out infinite;
+}
+
+@keyframes ledPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+.screen-inner {
+  width: 340px;
+  height: 604px;
+  border-radius: 26px;
+  background: var(--s0);
+  overflow: hidden;
+  position: relative;
+  /* Subtle LCD scan lines */
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,0.4);
+}
+
+/* subtle scanline overlay */
+.screen-inner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 3px,
+    rgba(0,0,0,0.025) 3px,
+    rgba(0,0,0,0.025) 4px
+  );
+  pointer-events: none;
+  z-index: 200;
+}
+
+/* ─── PRIVACY INDICATOR ─── */
+.priv-indicator {
+  position: absolute;
+  top: 38px;
+  right: 10px;
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(6,12,18,0.9);
+  border: 1px solid rgba(224,68,68,0.6);
+  border-radius: 20px;
+  padding: 3px 7px 3px 5px;
+  opacity: 0;
+  transform: translateY(-4px) scale(0.85);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  pointer-events: none;
+}
+
+.priv-indicator.active {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.priv-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--red-hi);
+  box-shadow: 0 0 5px var(--red-hi);
+  animation: privBlink 1.1s ease-in-out infinite;
+}
+
+@keyframes privBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.priv-label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--red-hi);
+  font-family: var(--font-mono);
+}
+
+/* ─── STATUS BAR ─── */
+.status-bar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 32px;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  background: rgba(8,17,28,0.88);
+  border-bottom: 1px solid rgba(27,130,168,0.1);
+  backdrop-filter: blur(4px);
+  transition: opacity 0.2s;
+}
+
+.sb-time {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+}
+
+.sb-right {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.wifi-icon { display: flex; align-items: flex-end; gap: 1.5px; height: 10px; }
+.wifi-bar { width: 3px; background: var(--text-2); border-radius: 1px; }
+.wifi-bar:nth-child(1) { height: 4px; }
+.wifi-bar:nth-child(2) { height: 7px; }
+.wifi-bar:nth-child(3) { height: 10px; }
+
+.battery-wrap { display: flex; align-items: center; gap: 1px; }
+.battery-body { width: 18px; height: 9px; border: 1.5px solid var(--text-2); border-radius: 2px; position: relative; overflow: hidden; }
+.battery-fill { position: absolute; left: 1px; top: 1px; bottom: 1px; width: 72%; background: var(--green); border-radius: 1px; }
+.battery-tip { width: 2px; height: 5px; background: var(--text-2); border-radius: 0 1px 1px 0; }
+
+/* ─── SCREENS ─── */
+.screens-wrap { position: absolute; inset: 0; }
+
+.sv {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(6px);
+  transition: opacity 0.22s ease, transform 0.22s ease;
+  overflow: hidden;
+}
+
+.sv.active {
+  opacity: 1;
+  pointer-events: all;
+  transform: translateY(0);
+}
+
+/* ─── BOOT ─── */
+#sv-boot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 36px;
+  background: var(--s0);
+}
+
+.boot-mark {
+  text-align: center;
+}
+
+.boot-wordmark {
+  font-size: 22px;
+  font-weight: 200;
+  letter-spacing: 0.38em;
+  text-transform: uppercase;
+  color: var(--text-1);
+  padding-left: 0.38em; /* compensate letter-spacing */
+}
+
+.boot-wordmark b {
+  color: var(--accent-hi);
+  font-weight: 200;
+}
+
+.boot-tagline {
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-top: 10px;
+  padding-left: 0.22em;
+}
+
+.boot-progress {
+  display: flex;
+  gap: 8px;
+}
+
+.boot-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent-lo);
+  animation: bootPop 1.4s ease-in-out infinite;
+}
+.boot-dot:nth-child(1) { animation-delay: 0s; }
+.boot-dot:nth-child(2) { animation-delay: 0.22s; }
+.boot-dot:nth-child(3) { animation-delay: 0.44s; }
+
+@keyframes bootPop {
+  0%, 60%, 100% { background: var(--accent-lo); transform: scale(1); }
+  30% { background: var(--accent-hi); transform: scale(1.4); }
+}
+
+.boot-ver {
+  position: absolute;
+  bottom: 22px;
+  font-size: 9px;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+}
+
+/* ─── LOCK ─── */
+#sv-lock {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--s0);
+  padding: 0 28px 28px;
+  position: relative;
+}
+
+#sv-lock::before {
+  content: '';
+  position: absolute;
+  top: -60px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 280px;
+  height: 280px;
+  background: radial-gradient(circle, rgba(27,130,168,0.1) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.lock-clock {
+  font-size: 72px;
+  font-weight: 100;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+  margin-top: 52px;
+  line-height: 1;
+}
+
+.lock-date {
+  font-size: 12px;
+  color: var(--text-2);
+  letter-spacing: 0.07em;
+  margin-top: 10px;
+  text-transform: uppercase;
+}
+
+.lock-divider {
+  width: 36px;
+  height: 1px;
+  background: var(--text-3);
+  margin: 28px 0 0;
+}
+
+.lock-pin-hint {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin: 16px 0;
+}
+
+.lock-dots {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 32px;
+}
+
+.pin-dot {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid var(--text-3);
+  transition: background 0.12s, border-color 0.12s, transform 0.12s;
+}
+
+.pin-dot.filled {
+  background: var(--accent-hi);
+  border-color: var(--accent-hi);
+  transform: scale(1.1);
+}
+
+.numpad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  width: 100%;
+  max-width: 230px;
+}
+
+.numkey {
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--s2);
+  border: none;
+  color: var(--text-1);
+  font-size: 20px;
+  font-weight: 300;
+  font-family: var(--font);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s, transform 0.1s;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  outline: none;
+}
+
+.numkey:hover { background: var(--s3); }
+.numkey:active { background: var(--s4); transform: scale(0.91); }
+
+.numkey.k-del { font-size: 16px; color: var(--text-2); }
+.numkey.k-empty { background: transparent; cursor: default; pointer-events: none; }
+
+.lock-hint {
+  margin-top: 22px;
+  font-size: 10px;
+  color: var(--text-3);
+  letter-spacing: 0.06em;
+}
+
+/* ─── HOME ─── */
+#sv-home {
+  display: flex;
+  flex-direction: column;
+  background: var(--s0);
+  padding-top: 32px;
+}
+
+.home-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.home-greeting {
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.home-greeting strong { color: var(--text-1); font-weight: 500; }
+
+.privacy-tray {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.ptray-cell {
+  background: var(--s1);
+  border-radius: var(--r-md);
+  padding: 10px 8px;
+  text-align: center;
+  border: 1px solid transparent;
+}
+
+.ptray-cell.ok { border-color: rgba(43,168,105,0.2); }
+.ptray-cell.warn { border-color: rgba(200,125,14,0.2); }
+
+.ptray-val {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+}
+
+.ptray-val.ok { color: var(--green); }
+.ptray-val.warn { color: var(--amber); }
+
+.ptray-label {
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-top: 3px;
+}
+
+.app-grid-label {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.app-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.app-icon {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 4px 8px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background 0.12s, transform 0.1s;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.app-icon:hover { background: var(--s2); }
+.app-icon:active { background: var(--s3); transform: scale(0.93); }
+
+.app-glyph {
+  width: 50px;
+  height: 50px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  background: var(--s2);
+  border: 1px solid var(--s3);
+}
+
+.app-lbl {
+  font-size: 9px;
+  color: var(--text-2);
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+.home-dock {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 10px 16px 16px;
+  border-top: 1px solid rgba(27,130,168,0.1);
+  background: rgba(8,17,28,0.6);
+}
+
+.dock-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 18px;
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.dock-btn:hover { background: var(--s2); }
+
+.dock-ic { font-size: 20px; color: var(--text-2); line-height: 1; }
+.dock-lbl { font-size: 8px; color: var(--text-3); letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* Quick Settings Panel */
+.qs-panel {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  z-index: 90;
+  background: rgba(8,17,28,0.96);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--accent-lo);
+  padding: 36px 16px 16px;
+  transform: translateY(-100%);
+  transition: transform 0.3s cubic-bezier(0.4,0,0.2,1);
+}
+
+.qs-panel.open { transform: translateY(0); }
+
+.qs-head {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 12px;
+}
+
+.qs-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.qs-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 4px;
+  border-radius: var(--r-md);
+  background: var(--s2);
+  cursor: pointer;
+  font-size: 9px;
+  color: var(--text-3);
+  letter-spacing: 0.05em;
+  transition: background 0.12s, color 0.12s;
+  user-select: none;
+}
+
+.qs-tile.on {
+  background: var(--accent-lo);
+  color: var(--accent-hi);
+}
+
+.qs-tile-ic { font-size: 18px; }
+
+.qs-close {
+  width: 100%;
+  padding: 8px;
+  border-radius: var(--r-sm);
+  background: var(--s2);
+  border: none;
+  color: var(--text-2);
+  font-size: 12px;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.qs-close:hover { background: var(--s3); }
+
+/* Permission Sheet (inside home) */
+.perm-sheet {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  background: rgba(5,8,13,0.75);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s;
+}
+
+.perm-sheet.open { opacity: 1; pointer-events: all; }
+
+.perm-card {
+  background: var(--s2);
+  border-top: 1px solid rgba(27,130,168,0.2);
+  border-radius: var(--r-xl) var(--r-xl) 0 0;
+  padding: 16px 20px 32px;
+  transform: translateY(100%);
+  transition: transform 0.35s cubic-bezier(0.32,0,0.18,1);
+}
+
+.perm-sheet.open .perm-card { transform: translateY(0); }
+
+.perm-handle {
+  width: 36px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--text-3);
+  margin: 0 auto 18px;
+}
+
+.perm-app-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.perm-app-glyph {
+  width: 42px;
+  height: 42px;
+  border-radius: var(--r-sm);
+  background: var(--s3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+}
+
+.perm-app-name { font-size: 14px; font-weight: 500; color: var(--text-1); }
+.perm-app-id { font-size: 10px; color: var(--text-3); font-family: var(--font-mono); margin-top: 2px; }
+
+.perm-q {
+  font-size: 15px;
+  color: var(--text-1);
+  line-height: 1.45;
+  margin-bottom: 8px;
+}
+
+.perm-q strong { color: var(--accent-hi); }
+
+.perm-note {
+  font-size: 11px;
+  color: var(--text-2);
+  line-height: 1.6;
+  padding: 10px 12px;
+  background: var(--s1);
+  border-radius: var(--r-sm);
+  border-left: 2px solid var(--accent-lo);
+  margin-bottom: 18px;
+}
+
+.perm-opts { display: flex; flex-direction: column; gap: 7px; }
+
+.perm-opt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--s4);
+  background: var(--s1);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.perm-opt:hover { background: var(--s3); border-color: var(--accent-lo); }
+.perm-opt.opt-primary { border-color: rgba(27,130,168,0.35); }
+
+.perm-opt.opt-deny { border: none; background: transparent; }
+.perm-opt.opt-deny .perm-opt-lbl { color: var(--red-hi); }
+
+.perm-opt-ic { font-size: 13px; width: 18px; text-align: center; color: var(--text-2); flex-shrink: 0; }
+.perm-opt.opt-primary .perm-opt-ic { color: var(--accent-hi); }
+
+.perm-opt-lbl { font-size: 13px; color: var(--text-1); }
+.perm-opt-sub { font-size: 10px; color: var(--text-2); margin-top: 2px; }
+
+/* ─── SUB-SCREEN HEADER ─── */
+.sub-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(27,130,168,0.08);
+  flex-shrink: 0;
+}
+
+.back-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  background: var(--s2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 15px;
+  color: var(--text-2);
+  transition: background 0.12s;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.back-btn:hover { background: var(--s3); }
+
+.sub-title { font-size: 15px; font-weight: 500; color: var(--text-1); }
+.sub-sub { font-size: 10px; color: var(--text-3); font-family: var(--font-mono); margin-top: 2px; }
+
+/* ─── NETWORK ─── */
+#sv-network {
+  display: flex;
+  flex-direction: column;
+  background: var(--s0);
+  padding-top: 32px;
+}
+
+.net-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.net-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.net-stat {
+  background: var(--s1);
+  border-radius: var(--r-md);
+  padding: 12px 8px;
+  text-align: center;
+}
+
+.net-stat-val {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+}
+
+.net-stat-val.red { color: var(--red-hi); }
+.net-stat-val.green { color: var(--green); }
+
+.net-stat-lbl {
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-top: 3px;
+}
+
+.section-lbl {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 8px;
+  padding: 0 2px;
+}
+
+.net-list { display: flex; flex-direction: column; gap: 3px; }
+
+.net-item { background: var(--s1); border-radius: var(--r-sm); overflow: hidden; }
+
+.net-item-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.net-item-row:hover { background: var(--s2); }
+
+.net-ic { font-size: 16px; width: 26px; text-align: center; flex-shrink: 0; }
+
+.net-info { flex: 1; min-width: 0; }
+.net-app-nm { font-size: 12px; color: var(--text-1); font-weight: 500; }
+.net-domains { font-size: 10px; color: var(--text-2); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.net-domains.warn { color: var(--amber); }
+
+.net-bytes { font-size: 10px; color: var(--text-3); font-family: var(--font-mono); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.net-bytes.warn { color: var(--amber); }
+
+.net-details { display: none; padding: 0 12px 10px 48px; }
+.net-details.open { display: block; }
+
+.net-calls { display: flex; flex-direction: column; gap: 4px; }
+
+.net-call {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--s0);
+  border-radius: var(--r-sm);
+  font-size: 10px;
+  font-family: var(--font-mono);
+}
+
+.nc-domain { flex: 1; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nc-size { color: var(--text-3); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+
+.nc-block-btn {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--red-bg);
+  border: 1px solid var(--red);
+  color: var(--red-hi);
+  cursor: pointer;
+  font-size: 8px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  flex-shrink: 0;
+  transition: background 0.1s, color 0.1s;
+}
+
+.nc-block-btn:hover { background: var(--red); color: #fff; }
+
+.nc-blocked {
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--s0);
+  border: 1px solid var(--text-3);
+  color: var(--text-3);
+  font-size: 8px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-decoration: line-through;
+  flex-shrink: 0;
+}
+
+/* ─── VAULT ─── */
+#sv-vault {
+  display: flex;
+  flex-direction: column;
+  background: var(--s0);
+  padding-top: 32px;
+}
+
+.vault-body { flex: 1; overflow-y: auto; padding: 12px; }
+
+.vault-card {
+  background: linear-gradient(135deg, var(--s2), var(--s3));
+  border: 1px solid rgba(27,130,168,0.2);
+  border-radius: var(--r-lg);
+  padding: 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.vault-ic { font-size: 30px; flex-shrink: 0; margin-top: 2px; }
+
+.vault-status-lbl {
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--green);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.vault-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); display: inline-block; }
+
+.vault-desc { font-size: 12px; color: var(--text-2); line-height: 1.45; }
+.vault-algo { font-family: var(--font-mono); font-size: 9px; color: var(--text-3); margin-top: 7px; }
+.vault-details-btn {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--accent-hi);
+  margin-top: 7px;
+  cursor: pointer;
+  user-select: none;
+}
+.vault-details-btn:hover { text-decoration: underline; }
+
+.vault-files { display: flex; flex-direction: column; gap: 3px; }
+
+.vault-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  background: var(--s1);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.vault-file:hover { background: var(--s2); }
+
+.vf-ic { font-size: 18px; width: 26px; text-align: center; flex-shrink: 0; }
+.vf-info { flex: 1; min-width: 0; }
+.vf-name { font-size: 12px; color: var(--text-1); }
+.vf-meta { font-size: 10px; color: var(--text-3); font-family: var(--font-mono); margin-top: 2px; }
+.vf-lock { font-size: 13px; color: var(--green); flex-shrink: 0; }
+
+/* ─── SETTINGS ─── */
+#sv-settings {
+  display: flex;
+  flex-direction: column;
+  background: var(--s0);
+  padding-top: 32px;
+}
+
+.settings-body { flex: 1; overflow-y: auto; padding: 12px; }
+
+.settings-group { margin-bottom: 18px; }
+
+.settings-list {
+  background: var(--s1);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(27,130,168,0.06);
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.setting-row:last-child { border-bottom: none; }
+.setting-row:hover { background: var(--s2); }
+
+.s-ic { font-size: 16px; width: 24px; text-align: center; flex-shrink: 0; }
+.s-info { flex: 1; }
+.s-lbl { font-size: 13px; color: var(--text-1); }
+.s-desc { font-size: 10px; color: var(--text-2); margin-top: 2px; line-height: 1.4; }
+
+.toggle {
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  background: var(--s4);
+  position: relative;
+  cursor: pointer;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.toggle.on { background: var(--accent); }
+
+.toggle::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-3);
+  transition: transform 0.2s, background 0.2s;
+}
+
+.toggle.on::after { transform: translateX(16px); background: #fff; }
+
+.toggle.disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ─── TERMINAL ─── */
+#sv-terminal {
+  display: flex;
+  flex-direction: column;
+  background: #030810;
+  padding-top: 32px;
+}
+
+.term-sub-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(27,130,168,0.08);
+  background: #04090F;
+  flex-shrink: 0;
+}
+
+.term-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 14px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.75;
+  color: #7AA8BE;
+}
+
+.t-prompt { color: #3DD886; }
+.t-out { color: #5A8099; }
+.t-hi { color: var(--accent-hi); }
+.t-warn { color: var(--amber-hi); }
+.t-err { color: var(--red-hi); }
+.t-br { height: 4px; display: block; }
+
+.term-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 11px;
+  background: var(--accent-hi);
+  vertical-align: text-bottom;
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* ─── SCREEN LABEL ─── */
+.screen-label {
+  text-align: center;
+  max-width: 340px;
+}
+
+.screen-name {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent-hi);
+  margin-bottom: 6px;
+}
+
+.screen-desc {
+  display: block;
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+/* ─── INTERACTION GUIDE ─── */
+.guide {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  gap: 20px;
+  margin-top: 8px;
+  max-width: 340px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.guide-chip {
+  font-size: 10px;
+  color: var(--text-3);
+  padding: 4px 10px;
+  border: 1px solid var(--s3);
+  border-radius: 20px;
+  letter-spacing: 0.04em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@media (max-width: 400px) {
+  .screen-inner { width: 300px; height: 532px; }
+}
+</style>
+
+<!-- ─── PAGE ─── -->
+<header class="page-header">
+  <div>
+    <span class="brand-name">S<em>O</em>VEREIGN OS</span>
+    <span class="brand-sub">Ubuntu 24.04 LTS · Lomiri Shell · RPi 5</span>
+  </div>
+  <span class="preview-badge">Interactive Preview</span>
+</header>
+
+<main class="device-wrapper">
+  <div class="device-outer">
+    <div class="power-led"></div>
+
+    <div class="screen-inner" id="screenInner">
+
+      <!-- Privacy indicator -->
+      <div class="priv-indicator" id="privIndicator">
+        <span class="priv-dot"></span>
+        <span class="priv-label">CAM</span>
+      </div>
+
+      <!-- Status bar -->
+      <div class="status-bar" id="statusBar" style="display:none">
+        <span class="sb-time" id="sbTime">00:00</span>
+        <div class="sb-right">
+          <div class="wifi-icon"><div class="wifi-bar"></div><div class="wifi-bar"></div><div class="wifi-bar"></div></div>
+          <div class="battery-wrap">
+            <div class="battery-body"><div class="battery-fill"></div></div>
+            <div class="battery-tip"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick settings panel (shared across home/sub-screens) -->
+      <div class="qs-panel" id="qsPanel">
+        <div class="qs-head">Quick Settings</div>
+        <div class="qs-tiles">
+          <div class="qs-tile on" onclick="this.classList.toggle('on')">
+            <span class="qs-tile-ic">📶</span>
+            <span>Wi-Fi</span>
+          </div>
+          <div class="qs-tile" onclick="this.classList.toggle('on')">
+            <span class="qs-tile-ic">🔵</span>
+            <span>BT</span>
+          </div>
+          <div class="qs-tile on" onclick="this.classList.toggle('on')">
+            <span class="qs-tile-ic">🔒</span>
+            <span>VPN</span>
+          </div>
+          <div class="qs-tile" onclick="this.classList.toggle('on')">
+            <span class="qs-tile-ic">✈</span>
+            <span>Flight</span>
+          </div>
+        </div>
+        <button class="qs-close" onclick="closeQs()">Close</button>
+      </div>
+
+      <div class="screens-wrap">
+
+        <!-- ── BOOT ── -->
+        <div class="sv active" id="sv-boot">
+          <div class="boot-mark">
+            <div class="boot-wordmark">S<b>O</b>VEREIGN</div>
+            <div class="boot-tagline">Privacy-First Mobile Linux</div>
+          </div>
+          <div class="boot-progress">
+            <div class="boot-dot"></div>
+            <div class="boot-dot"></div>
+            <div class="boot-dot"></div>
+          </div>
+          <div class="boot-ver">v0.2.1 · Ubuntu 24.04 LTS · Lomiri 0.2.1</div>
+        </div>
+
+        <!-- ── LOCK ── -->
+        <div class="sv" id="sv-lock">
+          <div class="lock-clock" id="lockClock">--:--</div>
+          <div class="lock-date" id="lockDate">---</div>
+          <div class="lock-divider"></div>
+          <div class="lock-pin-hint">Enter PIN</div>
+          <div class="lock-dots">
+            <div class="pin-dot" id="pd0"></div>
+            <div class="pin-dot" id="pd1"></div>
+            <div class="pin-dot" id="pd2"></div>
+            <div class="pin-dot" id="pd3"></div>
+          </div>
+          <div class="numpad">
+            <button class="numkey" onclick="pin('1')">1</button>
+            <button class="numkey" onclick="pin('2')">2</button>
+            <button class="numkey" onclick="pin('3')">3</button>
+            <button class="numkey" onclick="pin('4')">4</button>
+            <button class="numkey" onclick="pin('5')">5</button>
+            <button class="numkey" onclick="pin('6')">6</button>
+            <button class="numkey" onclick="pin('7')">7</button>
+            <button class="numkey" onclick="pin('8')">8</button>
+            <button class="numkey" onclick="pin('9')">9</button>
+            <div class="numkey k-empty"></div>
+            <button class="numkey" onclick="pin('0')">0</button>
+            <button class="numkey k-del" onclick="pinDel()">⌫</button>
+          </div>
+          <div class="lock-hint">Any 4 digits to unlock demo</div>
+        </div>
+
+        <!-- ── HOME ── -->
+        <div class="sv" id="sv-home">
+          <div class="home-body">
+            <div class="home-greeting">Good afternoon, <strong>Device User</strong></div>
+
+            <div class="privacy-tray">
+              <div class="ptray-cell ok">
+                <div class="ptray-val ok">0</div>
+                <div class="ptray-label">Trackers</div>
+              </div>
+              <div class="ptray-cell">
+                <div class="ptray-val" id="permCount">3</div>
+                <div class="ptray-label">Permissions</div>
+              </div>
+              <div class="ptray-cell ok">
+                <div class="ptray-val ok">ON</div>
+                <div class="ptray-label">Firewall</div>
+              </div>
+            </div>
+
+            <div class="app-grid-label">APPS</div>
+            <div class="app-grid">
+              <div class="app-icon" onclick="openPerm()">
+                <div class="app-glyph">📷</div>
+                <span class="app-lbl">Camera</span>
+              </div>
+              <div class="app-icon" onclick="goTo('vault')">
+                <div class="app-glyph">🔐</div>
+                <span class="app-lbl">Vault</span>
+              </div>
+              <div class="app-icon" onclick="goTo('network')">
+                <div class="app-glyph">📡</div>
+                <span class="app-lbl">Network</span>
+              </div>
+              <div class="app-icon" onclick="goTo('settings')">
+                <div class="app-glyph">⚙</div>
+                <span class="app-lbl">Settings</span>
+              </div>
+              <div class="app-icon">
+                <div class="app-glyph">📁</div>
+                <span class="app-lbl">Files</span>
+              </div>
+              <div class="app-icon">
+                <div class="app-glyph">🔄</div>
+                <span class="app-lbl">Syncthing</span>
+              </div>
+              <div class="app-icon">
+                <div class="app-glyph">🌐</div>
+                <span class="app-lbl">Browser</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="home-dock">
+            <div class="dock-btn">
+              <span class="dock-ic">←</span>
+              <span class="dock-lbl">Back</span>
+            </div>
+            <div class="dock-btn">
+              <span class="dock-ic">○</span>
+              <span class="dock-lbl">Home</span>
+            </div>
+            <div class="dock-btn">
+              <span class="dock-ic">□</span>
+              <span class="dock-lbl">Recent</span>
+            </div>
+          </div>
+
+          <!-- Permission sheet -->
+          <div class="perm-sheet" id="permSheet">
+            <div class="perm-card">
+              <div class="perm-handle"></div>
+              <div class="perm-app-row">
+                <div class="perm-app-glyph">📷</div>
+                <div>
+                  <div class="perm-app-name">Camera</div>
+                  <div class="perm-app-id">org.aura.camera (Flatpak)</div>
+                </div>
+              </div>
+              <div class="perm-q">Camera wants access to your <strong>Microphone</strong></div>
+              <div class="perm-note">
+                You're always in control — change this anytime in Settings → Privacy.
+              </div>
+              <div class="perm-opts">
+                <div class="perm-opt opt-primary" onclick="grant('open')">
+                  <span class="perm-opt-ic">▶</span>
+                  <div>
+                    <div class="perm-opt-lbl">Allow while Camera is open</div>
+                    <div class="perm-opt-sub">Remembered — won't ask again until you revoke it</div>
+                  </div>
+                </div>
+                <div class="perm-opt" onclick="grant('once')">
+                  <span class="perm-opt-ic">1×</span>
+                  <div>
+                    <div class="perm-opt-lbl">Just this once</div>
+                    <div class="perm-opt-sub">Asks again next time</div>
+                  </div>
+                </div>
+                <div class="perm-opt opt-deny" onclick="grant('deny')">
+                  <span class="perm-opt-ic" style="color:var(--red-hi)">✕</span>
+                  <div>
+                    <div class="perm-opt-lbl">Deny</div>
+                    <div class="perm-opt-sub">No microphone access</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── NETWORK ── -->
+        <div class="sv" id="sv-network">
+          <div class="sub-header">
+            <div class="back-btn" onclick="goTo('home')">←</div>
+            <div>
+              <div class="sub-title">Network Monitor</div>
+              <div class="sub-sub">per-app · last 24 h · 14.2 MB out</div>
+            </div>
+          </div>
+
+          <div class="net-body">
+            <div class="net-summary">
+              <div class="net-stat">
+                <div class="net-stat-val">7</div>
+                <div class="net-stat-lbl">Active Apps</div>
+              </div>
+              <div class="net-stat">
+                <div class="net-stat-val">14.2</div>
+                <div class="net-stat-lbl">MB Out</div>
+              </div>
+              <div class="net-stat">
+                <div class="net-stat-val red">2</div>
+                <div class="net-stat-lbl">Blocked</div>
+              </div>
+            </div>
+
+            <div class="section-lbl">APP TRAFFIC — tap to expand</div>
+
+            <div class="net-list">
+              <div class="net-item">
+                <div class="net-item-row" onclick="toggleNet(this)">
+                  <span class="net-ic">🌐</span>
+                  <div class="net-info">
+                    <div class="net-app-nm">Browser</div>
+                    <div class="net-domains">duckduckgo.com, cdn.mozilla.net</div>
+                  </div>
+                  <div class="net-bytes">8.4 MB</div>
+                </div>
+                <div class="net-details">
+                  <div class="net-calls">
+                    <div class="net-call">
+                      <span class="nc-domain">duckduckgo.com</span>
+                      <span class="nc-size">6.1 MB</span>
+                      <button class="nc-block-btn" onclick="blockCall(this)">BLOCK</button>
+                    </div>
+                    <div class="net-call">
+                      <span class="nc-domain">cdn.mozilla.net</span>
+                      <span class="nc-size">2.3 MB</span>
+                      <button class="nc-block-btn" onclick="blockCall(this)">BLOCK</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="net-item">
+                <div class="net-item-row" onclick="toggleNet(this)">
+                  <span class="net-ic">🔄</span>
+                  <div class="net-info">
+                    <div class="net-app-nm">Syncthing</div>
+                    <div class="net-domains">192.168.1.12 (LAN peer)</div>
+                  </div>
+                  <div class="net-bytes">4.1 MB</div>
+                </div>
+                <div class="net-details">
+                  <div class="net-calls">
+                    <div class="net-call">
+                      <span class="nc-domain">192.168.1.12:22000</span>
+                      <span class="nc-size">4.1 MB</span>
+                      <button class="nc-block-btn" onclick="blockCall(this)">BLOCK</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="net-item">
+                <div class="net-item-row" onclick="toggleNet(this)">
+                  <span class="net-ic">⚙</span>
+                  <div class="net-info">
+                    <div class="net-app-nm">System Updater</div>
+                    <div class="net-domains">archive.ubuntu.com</div>
+                  </div>
+                  <div class="net-bytes">1.4 MB</div>
+                </div>
+                <div class="net-details">
+                  <div class="net-calls">
+                    <div class="net-call">
+                      <span class="nc-domain">archive.ubuntu.com</span>
+                      <span class="nc-size">1.4 MB</span>
+                      <button class="nc-block-btn" onclick="blockCall(this)">BLOCK</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="net-item">
+                <div class="net-item-row" onclick="toggleNet(this)">
+                  <span class="net-ic">📷</span>
+                  <div class="net-info">
+                    <div class="net-app-nm">Camera</div>
+                    <div class="net-domains warn">1 outbound attempt — blocked</div>
+                  </div>
+                  <div class="net-bytes warn">0 B</div>
+                </div>
+                <div class="net-details">
+                  <div class="net-calls">
+                    <div class="net-call" style="opacity:0.55">
+                      <span class="nc-domain">telemetry.vendor-sdk.io</span>
+                      <span class="nc-size">0 B</span>
+                      <span class="nc-blocked">BLOCKED</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── VAULT ── -->
+        <div class="sv" id="sv-vault">
+          <div class="sub-header">
+            <div class="back-btn" onclick="goTo('home')">←</div>
+            <div>
+              <div class="sub-title">Data Vault</div>
+              <div class="sub-sub">fscrypt · AES-256-XTS · Argon2id</div>
+            </div>
+          </div>
+
+          <div class="vault-body">
+            <div class="vault-card">
+              <span class="vault-ic">🔐</span>
+              <div>
+                <div class="vault-status-lbl"><span class="vault-dot"></span> UNLOCKED — Device Active</div>
+                <div class="vault-desc">Vault is readable while device is unlocked. Auto-locks when screen turns off — keys discarded from RAM.</div>
+                <div class="vault-algo" id="vaultAlgo" style="display:none">LUKS2 full-disk · fscrypt per-dir · Argon2id KDF · hardware AES-NI</div>
+                <div class="vault-details-btn" id="vaultDetailsBtn" onclick="toggleVaultDetails(this)">Details</div>
+              </div>
+            </div>
+
+            <div class="section-lbl" style="margin-bottom:8px">ENCRYPTED FILES</div>
+
+            <div class="vault-files">
+              <div class="vault-file">
+                <span class="vf-ic">📸</span>
+                <div class="vf-info">
+                  <div class="vf-name">Photos</div>
+                  <div class="vf-meta">284 items · 1.2 GB · encrypted-at-rest</div>
+                </div>
+                <span class="vf-lock">🔒</span>
+              </div>
+              <div class="vault-file">
+                <span class="vf-ic">📞</span>
+                <div class="vf-info">
+                  <div class="vf-name">Contacts</div>
+                  <div class="vf-meta">91 entries · vCard 4.0 · encrypted-at-rest</div>
+                </div>
+                <span class="vf-lock">🔒</span>
+              </div>
+              <div class="vault-file">
+                <span class="vf-ic">📝</span>
+                <div class="vf-info">
+                  <div class="vf-name">Notes</div>
+                  <div class="vf-meta">14 notes · 48 KB · encrypted-at-rest</div>
+                </div>
+                <span class="vf-lock">🔒</span>
+              </div>
+              <div class="vault-file">
+                <span class="vf-ic">📂</span>
+                <div class="vf-info">
+                  <div class="vf-name">Downloads</div>
+                  <div class="vf-meta">8 files · 420 MB · encrypted-at-rest</div>
+                </div>
+                <span class="vf-lock">🔒</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── SETTINGS ── -->
+        <div class="sv" id="sv-settings">
+          <div class="sub-header">
+            <div class="back-btn" onclick="goTo('home')">←</div>
+            <div>
+              <div class="sub-title">Privacy Settings</div>
+              <div class="sub-sub">All permissions visible and revocable</div>
+            </div>
+          </div>
+
+          <div class="settings-body">
+            <div class="settings-group">
+              <div class="section-lbl" style="margin-bottom:8px">PROTECTIONS</div>
+              <div class="settings-list">
+                <div class="setting-row">
+                  <span class="s-ic">🛡</span>
+                  <div class="s-info">
+                    <div class="s-lbl">Apps can't tamper with each other or the system</div>
+                    <div class="s-desc">AppArmor — 48 profiles enforced</div>
+                  </div>
+                  <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+                </div>
+                <div class="setting-row">
+                  <span class="s-ic">🔥</span>
+                  <div class="s-info">
+                    <div class="s-lbl">Nothing reaches in from outside uninvited</div>
+                    <div class="s-desc">Firewall (ufw) — inbound blocked, outbound allowed</div>
+                  </div>
+                  <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+                </div>
+                <div class="setting-row">
+                  <span class="s-ic">📦</span>
+                  <div class="s-info">
+                    <div class="s-lbl">Every app runs in its own sandbox</div>
+                    <div class="s-desc">Bubblewrap isolation — all Flatpak apps</div>
+                  </div>
+                  <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="section-lbl" style="margin-bottom:8px">ACCESS INDICATORS</div>
+              <div class="settings-list">
+                <div class="setting-row">
+                  <span class="s-ic">🎙</span>
+                  <div class="s-info">
+                    <div class="s-lbl">Microphone Indicator</div>
+                    <div class="s-desc">Show dot when any app uses mic</div>
+                  </div>
+                  <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+                </div>
+                <div class="setting-row">
+                  <span class="s-ic">📷</span>
+                  <div class="s-info">
+                    <div class="s-lbl">Camera Indicator</div>
+                    <div class="s-desc">Show dot when camera is active</div>
+                  </div>
+                  <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+                </div>
+                <div class="setting-row">
+                  <span class="s-ic">📍</span>
+                  <div class="s-info">
+                    <div class="s-lbl">Location Indicator</div>
+                    <div class="s-desc">Show dot when GPS is in use</div>
+                  </div>
+                  <div class="toggle on" onclick="this.classList.toggle('on')"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="section-lbl" style="margin-bottom:8px">TELEMETRY — PURGED</div>
+              <div class="settings-list">
+                <div class="setting-row">
+                  <span class="s-ic">🚫</span>
+                  <div class="s-info">
+                    <div class="s-lbl">apport / whoopsie</div>
+                    <div class="s-desc">Ubuntu crash reporter — removed, apt-pinned</div>
+                  </div>
+                  <div class="toggle disabled"></div>
+                </div>
+                <div class="setting-row">
+                  <span class="s-ic">🚫</span>
+                  <div class="s-info">
+                    <div class="s-lbl">popularity-contest</div>
+                    <div class="s-desc">Package stats — removed, apt-pinned</div>
+                  </div>
+                  <div class="toggle disabled"></div>
+                </div>
+                <div class="setting-row">
+                  <span class="s-ic">🚫</span>
+                  <div class="s-info">
+                    <div class="s-lbl">MOTD News</div>
+                    <div class="s-desc">Canonical login banner — ENABLED=0</div>
+                  </div>
+                  <div class="toggle disabled"></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="settings-group">
+              <div class="section-lbl" style="margin-bottom:8px">ADVANCED</div>
+              <div class="settings-list">
+                <div class="setting-row" onclick="goTo('terminal')">
+                  <span class="s-ic" style="font-family:var(--font-mono);color:var(--green)">›_</span>
+                  <div class="s-info">
+                    <div class="s-lbl">Shell Access</div>
+                    <div class="s-desc">Terminal — for when you want to look under the hood</div>
+                  </div>
+                  <span class="s-ic" style="color:var(--text-3)">›</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── TERMINAL ── -->
+        <div class="sv" id="sv-terminal">
+          <div class="term-sub-header">
+            <div class="back-btn" style="background:var(--s1)" onclick="goTo('home')">←</div>
+            <div>
+              <div class="sub-title" style="font-family:var(--font-mono);font-size:13px;color:var(--green)">Terminal</div>
+              <div class="sub-sub">aura@pi5:~</div>
+            </div>
+          </div>
+
+          <div class="term-body">
+            <div><span class="t-prompt">aura@pi5:~$</span> uname -a</div>
+            <div class="t-out">Linux aura 6.6.20+rpt-rpi-2712 #1 SMP Ubuntu 24.04 LTS aarch64 GNU/Linux</div>
+            <span class="t-br"></span>
+            <div><span class="t-prompt">aura@pi5:~$</span> aa-status 2>/dev/null | head -4</div>
+            <div class="t-out">apparmor module is loaded.</div>
+            <div class="t-out"><span class="t-hi">48</span> profiles are loaded.</div>
+            <div class="t-out"><span class="t-hi">48</span> profiles are in enforce mode.</div>
+            <div class="t-out">0 profiles are in complain mode.</div>
+            <span class="t-br"></span>
+            <div><span class="t-prompt">aura@pi5:~$</span> ufw status verbose</div>
+            <div class="t-out">Status: <span class="t-hi">active</span></div>
+            <div class="t-out">Default: <span class="t-hi">deny</span> (incoming), allow (outgoing)</div>
+            <span class="t-br"></span>
+            <div><span class="t-prompt">aura@pi5:~$</span> flatpak list --app --columns=name,version</div>
+            <div class="t-out">Name        Version</div>
+            <div class="t-out">Camera      2.1.0</div>
+            <div class="t-out">Browser     120.0.1</div>
+            <div class="t-out">Files       44.6</div>
+            <span class="t-br"></span>
+            <div><span class="t-prompt">aura@pi5:~$</span> systemctl status syncthing | head -3</div>
+            <div class="t-out">● syncthing.service - Syncthing</div>
+            <div class="t-out">   Active: <span class="t-hi">active (running)</span> since 2026-07-02 14:28:03</div>
+            <span class="t-br"></span>
+            <div><span class="t-prompt">aura@pi5:~$</span> <span class="term-cursor"></span></div>
+          </div>
+        </div>
+
+      </div><!-- /screens-wrap -->
+    </div><!-- /screen-inner -->
+  </div><!-- /device-outer -->
+
+  <div class="screen-label">
+    <span class="screen-name" id="screenName">BOOTING</span>
+    <span class="screen-desc" id="screenDesc">Starting AuraOS — no account, no cloud login required</span>
+  </div>
+
+  <div class="guide">
+    <span class="guide-chip" id="guideA">Enter any 4 digits to unlock</span>
+    <span class="guide-chip" id="guideB">Tap Camera for a permission demo</span>
+  </div>
+</main>
+
+<script>
+(function () {
+  let current = 'boot';
+  let pinBuf = '';
+  let camActive = false;
+  let qsOpen = false;
+
+  const SCREENS = {
+    boot:     { name: 'BOOTING',         desc: 'Starting AuraOS — no account, no cloud login required' },
+    lock:     { name: 'LOCK SCREEN',     desc: 'No account needed — enter any 4-digit PIN to unlock the demo' },
+    home:     { name: 'HOME',            desc: 'Tap Camera for a permission demo · Status bar → drag down for Quick Settings' },
+    network:  { name: 'NETWORK MONITOR', desc: 'Per-app outbound log — every connection visible, blockable on demand' },
+    vault:    { name: 'DATA VAULT',      desc: 'fscrypt-encrypted personal storage — unreadable without device PIN' },
+    settings: { name: 'PRIVACY SETTINGS',desc: 'All permissions visible and revocable from one screen' },
+    terminal: { name: 'TERMINAL',        desc: 'Shell access — AppArmor, ufw, Flatpak and Syncthing all confirmed running' },
+  };
+
+  function goTo(id) {
+    if (id === current) return;
+    document.getElementById('sv-' + current).classList.remove('active');
+    current = id;
+    document.getElementById('sv-' + id).classList.add('active');
+    const m = SCREENS[id] || { name: id.toUpperCase(), desc: '' };
+    document.getElementById('screenName').textContent = m.name;
+    document.getElementById('screenDesc').textContent = m.desc;
+    const showBar = !['boot', 'lock'].includes(id);
+    document.getElementById('statusBar').style.display = showBar ? 'flex' : 'none';
+    if (qsOpen && id !== 'home') closeQs();
+  }
+
+  window.goTo = goTo;
+
+  // Clock
+  function updateClock() {
+    const n = new Date();
+    const t = String(n.getHours()).padStart(2,'0') + ':' + String(n.getMinutes()).padStart(2,'0');
+    const lc = document.getElementById('lockClock');
+    if (lc) lc.textContent = t;
+    const sb = document.getElementById('sbTime');
+    if (sb) sb.textContent = t;
+  }
+
+  function setLockDate() {
+    const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const n = new Date();
+    const el = document.getElementById('lockDate');
+    if (el) el.textContent = days[n.getDay()] + ', ' + months[n.getMonth()] + ' ' + n.getDate();
+  }
+
+  updateClock();
+  setLockDate();
+  setInterval(updateClock, 15000);
+
+  // Boot → Lock
+  setTimeout(() => goTo('lock'), 2600);
+
+  // PIN
+  window.pin = function(d) {
+    if (current !== 'lock' || pinBuf.length >= 4) return;
+    pinBuf += d;
+    refreshDots();
+    if (pinBuf.length === 4) {
+      setTimeout(() => {
+        pinBuf = '';
+        refreshDots();
+        goTo('home');
+      }, 280);
+    }
+  };
+
+  window.pinDel = function() {
+    if (current !== 'lock') return;
+    pinBuf = pinBuf.slice(0, -1);
+    refreshDots();
+  };
+
+  function refreshDots() {
+    for (let i = 0; i < 4; i++) {
+      document.getElementById('pd' + i).classList.toggle('filled', i < pinBuf.length);
+    }
+  }
+
+  // Keyboard PIN
+  document.addEventListener('keydown', function(e) {
+    if (current === 'lock') {
+      if (e.key >= '0' && e.key <= '9') window.pin(e.key);
+      if (e.key === 'Backspace') window.pinDel();
+    }
+    if (e.key === 'Escape' && qsOpen) closeQs();
+  });
+
+  // Permission sheet
+  window.openPerm = function() {
+    document.getElementById('permSheet').classList.add('open');
+    document.getElementById('screenName').textContent = 'PERMISSION REQUEST';
+    document.getElementById('screenDesc').textContent = 'Ask once, remembered, always visible and revocable';
+  };
+
+  // Vault details disclosure
+  window.toggleVaultDetails = function(btn) {
+    const el = document.getElementById('vaultAlgo');
+    const show = el.style.display === 'none';
+    el.style.display = show ? 'block' : 'none';
+    btn.textContent = show ? 'Hide details' : 'Details';
+  };
+
+  window.grant = function(type) {
+    document.getElementById('permSheet').classList.remove('open');
+    camActive = type !== 'deny';
+    document.getElementById('privIndicator').classList.toggle('active', camActive);
+    const cnt = document.getElementById('permCount');
+    if (cnt) cnt.textContent = camActive ? '4' : '3';
+    document.getElementById('screenName').textContent = SCREENS.home.name;
+    document.getElementById('screenDesc').textContent = camActive
+      ? 'Camera mic access granted — indicator dot is live in the top-right corner'
+      : SCREENS.home.desc;
+  };
+
+  // Network expand
+  window.toggleNet = function(row) {
+    const details = row.parentElement.querySelector('.net-details');
+    if (details) details.classList.toggle('open');
+  };
+
+  // Block a domain
+  window.blockCall = function(btn) {
+    const row = btn.closest('.net-call');
+    btn.outerHTML = '<span class="nc-blocked">BLOCKED</span>';
+    row.style.opacity = '0.5';
+  };
+
+  // Quick settings
+  function openQs() {
+    qsOpen = true;
+    document.getElementById('qsPanel').classList.add('open');
+  }
+
+  window.closeQs = function() {
+    qsOpen = false;
+    document.getElementById('qsPanel').classList.remove('open');
+  };
+
+  // Swipe-down gesture on status bar
+  let dragStartY = 0;
+  const statusBar = document.getElementById('statusBar');
+  statusBar.addEventListener('mousedown', function(e) { dragStartY = e.clientY; });
+  document.addEventListener('mouseup', function(e) {
+    if (!['home','network','vault','settings','terminal'].includes(current)) return;
+    const dy = e.clientY - dragStartY;
+    if (dy > 30 && !qsOpen) openQs();
+    if (dy < -20 && qsOpen) closeQs();
+    dragStartY = 0;
+  });
+
+  // Touch drag on status bar
+  statusBar.addEventListener('touchstart', function(e) { dragStartY = e.touches[0].clientY; }, { passive: true });
+  document.addEventListener('touchend', function(e) {
+    if (!['home','network','vault','settings','terminal'].includes(current)) return;
+    const dy = e.changedTouches[0].clientY - dragStartY;
+    if (dy > 40 && !qsOpen) openQs();
+    if (dy < -30 && qsOpen) closeQs();
+    dragStartY = 0;
+  }, { passive: true });
+
+})();
+</script>

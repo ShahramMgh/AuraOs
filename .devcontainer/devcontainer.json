@@ -1,0 +1,16 @@
+{
+  "name": "AuraOS build",
+  "build": {
+    "dockerfile": "../Dockerfile.dev",
+    "context": ".."
+  },
+  "remoteUser": "root",
+
+  // --privileged gives the container access to /dev/loop*, mount, parted,
+  // cryptsetup, and binfmt_misc — all required for the image builder.
+  "runArgs": ["--privileged"],
+
+  "postStartCommand": "/usr/local/bin/aura-entrypoint.sh true",
+
+  "postCreateCommand": "echo '' && echo '  AuraOS build container ready.' && echo '  Run:  sudo bash build.sh' && echo '  WiFi: sudo bash build.sh --wifi \"SSID:password\"' && echo ''"
+}
