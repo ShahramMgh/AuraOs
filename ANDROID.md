@@ -193,4 +193,8 @@ shell/js/shell.js           first-class App Store screen (renderAppStore) +
 
 The launcher integration touches the agent's existing `.desktop` discovery
 (`scan_desktop_apps`) and launch (`launch_desktop`) paths, so it stays one code
-path for native and Android apps — no parallel "Android launcher."
+path for native and Android apps — no parallel "Android launcher." In the
+shell they're unified under a single `android:<package>` identity (from
+`Sov.androidApps()`), so home tiles, the app drawer and the manager show the
+*same* installed apps, with real icons, and launch through one path; installing
+or removing an app updates all three.

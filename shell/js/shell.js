@@ -243,6 +243,14 @@
     const pgs = homePagesIds().map(p => (p || []).slice());
     if (!pgs.length) pgs.push([]);
     if (!pgs.some(p => p.includes(id))) { pgs[pgs.length - 1].push(id); PREF.set('homePages', pgs); }
+    _androidApps = null;   // drawer refetches
+  }
+  // Uninstalling an Android app removes it from home + name map everywhere.
+  function removeAndroidFromHome(pkg) {
+    const id = 'android:' + pkg;
+    const names = PREF.get('androidApps', {}); delete names[pkg]; PREF.set('androidApps', names);
+    PREF.set('homePages', homePagesIds().map(p => (p || []).filter(x => x !== id)));
+    _androidApps = null;
   }
   function homeLayout() {
     const cfg = HOME_CFG || Sov._homeCfgSync();
@@ -840,7 +848,7 @@
   // Real installed apps, discovered once from the agent's capability registry
   // and cached. This is what makes Ubuntu's own apps (Software, Text Editor,
   // LibreOffice, …) live inside the OS's launcher.
-  let INSTALLED = null;
+  let INSTALLED = null, _androidApps = null;
   const catIcon = cats => {
     const c = (cats || []).map(x => x.toLowerCase());
     if (c.some(x => /audio|video|music|player/.test(x))) return 'music';
@@ -897,6 +905,10 @@
       INSTALLED = (caps && caps.apps) || [];
       if (S.view !== 'drawer') return;   // navigated away while loading
     }
+    if (_androidApps === null) {   // installed Android apps, unified into the app list
+      _androidApps = [];
+      try { _androidApps = await Sov.androidApps(); } catch (e) {}
+    }
     if (_spotContacts === null) {   // fold contacts into search — call from a search
       _spotContacts = [];
       try {
@@ -919,24 +931,32 @@
     // real installed apps (deduped against the built-in names). Native Linux and
     // Android apps live in this one list, shown identically — an app's own icon
     // when we have it, a category glyph otherwise. Nothing marks an app "Android".
-    const iconSpan = a => {
-      const url = a.icon ? Sov.appIconUrl(a.id) : null;
-      return url
-        ? `<span class="glyph"><img class="app-ico-img" src="${esc(url)}" alt=""></span>`
-        : `<span class="glyph">${ic(catIcon(a.categories), 18)}</span>`;
-    };
+    // One "Apps" list for everything installed — native Linux apps and Android
+    // apps, shown identically (its own icon when we have it). Nothing marks an
+    // app "Android"; they're first-class. Android apps come from one source
+    // (Sov.androidApps → android:<pkg>), so the raw waydroid.* .desktop entries
+    // are filtered out of the native list to avoid showing each app twice.
+    const iconRow = (iconUrl, fallbackGlyph) => iconUrl
+      ? `<span class="glyph"><img class="app-ico-img" src="${esc(iconUrl)}" onerror="this.remove()" alt=""></span>`
+      : `<span class="glyph">${ic(fallbackGlyph, 18)}</span>`;
+    const appRow = (attr, iconUrl, glyph, name, sub) => `
+      <button class="row tappable" ${attr} style="width:100%;text-align:left">
+        ${iconRow(iconUrl, glyph)}
+        <span class="rtext"><div class="rtitle">${esc(name)}</div>
+          <div class="rsub">${esc(sub)}</div></span>
+        <span class="chev">${ic('chev', 16)}</span></button>`;
     const builtinNames = new Set(Sov.apps().map(a => a.name.toLowerCase()));
-    const inst = INSTALLED
+    const nativeRows = INSTALLED
       .filter(a => !builtinNames.has(a.name.toLowerCase()))
-      .filter(a => !q || a.name.toLowerCase().includes(q) || (a.comment || '').toLowerCase().includes(q));
-    const instHTML = inst.length ? `
-      <div class="lx-cat">Apps · ${inst.length}</div>
-      <div class="card">${inst.map(a => `
-        <button class="row tappable" data-desktop="${esc(a.id)}" style="width:100%;text-align:left">
-          ${iconSpan(a)}
-          <span class="rtext"><div class="rtitle">${esc(a.name)}</div>
-            <div class="rsub">${esc(a.comment || a.id)}</div></span>
-          <span class="chev">${ic('chev', 16)}</span></button>`).join('')}</div>` : '';
+      .filter(a => String(a.id).indexOf('waydroid.') !== 0)   // Android shown via the unified list
+      .filter(a => !q || a.name.toLowerCase().includes(q) || (a.comment || '').toLowerCase().includes(q))
+      .map(a => appRow(`data-desktop="${esc(a.id)}"`, a.icon ? Sov.appIconUrl(a.id) : null, catIcon(a.categories), a.name, a.comment || a.id));
+    const androidRows = (_androidApps || [])
+      .filter(a => a && a.package && (!q || (a.name || '').toLowerCase().includes(q)))
+      .map(a => appRow(`data-launch="android:${esc(a.package)}"`, Sov.appIconUrl('waydroid.' + a.package), 'android', a.name || a.package, 'App'));
+    const allRows = [...nativeRows, ...androidRows];
+    const instHTML = allRows.length
+      ? `<div class="lx-cat">Apps · ${allRows.length}</div><div class="card">${allRows.join('')}</div>` : '';
 
     // Spotlight: settings pages + quick actions matching the query.
     const spots = spotlightMatches(q);
@@ -1880,7 +1900,9 @@
     });
 
     $$('[data-aremove]').forEach(b => b.onclick = async () => {
-      const r = await Sov.androidRemove(b.dataset.aremove);
+      const pkg = b.dataset.aremove;
+      const r = await Sov.androidRemove(pkg);
+      if (r && r.ok) removeAndroidFromHome(pkg);   // clean home tile + drawer too
       toast(r && r.ok ? 'App removed' : ((r && r.error) || 'Remove failed'),
             r && r.ok ? 'warn' : 'alert', r && r.ok ? 'trash' : 'x');
       refresh();
@@ -3337,8 +3359,10 @@
   };
   function placeholderView(app) {
     const note = app.android ? 'Handed to the Android runtime (Waydroid).' : 'Running inside AuraOS.';
+    const iconUrl = app.android && app.pkg && Sov.appIconUrl ? Sov.appIconUrl('waydroid.' + app.pkg) : null;
+    const badge = iconUrl ? `<img class="af-badge-img" src="${esc(iconUrl)}" onerror="this.remove()" alt="">` : ic(app.glyph, 30);
     return `<div class="af-placeholder">
-      <div class="af-badge" style="--tint:${app.color}">${ic(app.glyph,30)}</div>
+      <div class="af-badge" style="--tint:${app.color}">${badge}</div>
       <div class="af-name">${esc(app.name)}</div>
       <div class="af-note">${note}</div></div>`;
   }
@@ -3908,7 +3932,8 @@
   function renderControlRecents(running) {
     S.recentsOpen = true;
     const items = running.map(r => {
-      const a = Sov.app(r.appId);
+      const a = Sov.app(r.appId) || resolveHomeApp(r.appId);   // resolve android:<pkg> too
+      if (!a) return '';
       const sens = Sov.activeSensorsFor(a.id);
       return `<div class="row">
         <span class="li-badge" style="--tint:${a.color}">${ic(a.glyph,16)}</span>

@@ -2318,3 +2318,6 @@ input  { font: inherit; }
   #appframe { transition: none; }
   #stage.nav-fwd .view.active, #stage.nav-back .view.active { animation: none; }
 }
+
+/* Real Android icon in the app-frame badge */
+.af-placeholder .af-badge .af-badge-img { width: 100%; height: 100%; border-radius: 16px; object-fit: cover; display: block; }
