@@ -37,8 +37,36 @@
     { id: 'mono',   name: 'Mono',   css: 'radial-gradient(120% 90% at 50% 0%, #12161c 0%, #0a0d12 55%, #050709 100%)' },
   ];
   function applyWallpaper() {
+    const img = PREF.get('wallpaperImg', null);
+    const url = img && Sov.photoUrl ? Sov.photoUrl(img) : null;
+    if (url) {   // a photo from ~/Pictures wins over the gradient presets
+      document.documentElement.style.setProperty('--wallpaper', `center / cover no-repeat url("${url}")`);
+      return;
+    }
     const w = WALLPAPERS.find(x => x.id === PREF.get('wallpaper', 'petrol')) || WALLPAPERS[0];
     document.documentElement.style.setProperty('--wallpaper', w.css);
+  }
+  // A photo picker (~/Pictures) → set it as the wallpaper.
+  async function openPhotoPicker() {
+    const scrim = $('#promptScrim');
+    const close = () => { scrim.classList.remove('open'); setTimeout(() => { if (!scrim.classList.contains('open')) scrim.innerHTML = ''; }, 200); };
+    const r = await Sov.photos();
+    const items = (r && r.items) || [];
+    if (!items.length) {
+      scrim.innerHTML = `<div class="prompt-card"><div class="pc-title">No photos</div>
+        <div class="pc-body">Add images to <b>~/Pictures</b> on the device first.</div>
+        <button class="pbtn allow" data-close style="margin-top:12px">OK</button></div>`;
+      scrim.classList.add('open'); scrim.querySelector('[data-close]').onclick = close; return;
+    }
+    scrim.innerHTML = `<div class="prompt-card wp-picker"><div class="pc-title">Choose a photo</div>
+      <div class="wp-photos">${items.slice(0, 60).map((it, i) => `<button class="wp-photo" data-i="${i}"><img loading="lazy" src="${Sov.photoUrl(it.rel)}" alt=""></button>`).join('')}</div>
+      <button class="pbtn deny" data-close style="margin-top:10px">Cancel</button></div>`;
+    scrim.classList.add('open');
+    scrim.querySelector('[data-close]').onclick = close;
+    scrim.querySelectorAll('[data-i]').forEach(b => b.onclick = () => {
+      PREF.set('wallpaperImg', items[+b.dataset.i].rel); applyWallpaper();
+      toast('Wallpaper set', 'ok', 'check'); close();
+    });
   }
 
   /* Color themes — one accent hue drives the whole appearance: every derived
@@ -371,15 +399,18 @@
   function openWallpaperSheet() {
     const wp = PREF.get('wallpaper', 'petrol');
     const scrim = $('#promptScrim');
+    const usingPhoto = !!PREF.get('wallpaperImg', null);
     scrim.innerHTML = `<div class="prompt-card wp-sheet">
       <div class="pc-title">Wallpaper</div>
       <div class="wp-grid">${WALLPAPERS.map(w =>
-        `<button class="wp-sw ${w.id === wp ? 'on' : ''}" data-wp2="${w.id}" style="background:${w.css}">
-           <span class="wp-name">${w.name}</span>${w.id === wp ? `<span class="wp-chk">${ic('check',16)}</span>` : ''}</button>`).join('')}</div>
-      <button class="pbtn allow" data-wpclose style="margin-top:12px">Done</button>
+        `<button class="wp-sw ${!usingPhoto && w.id === wp ? 'on' : ''}" data-wp2="${w.id}" style="background:${w.css}">
+           <span class="wp-name">${w.name}</span>${!usingPhoto && w.id === wp ? `<span class="wp-chk">${ic('check',16)}</span>` : ''}</button>`).join('')}</div>
+      <button class="pbtn ghost" data-wpphoto style="margin-top:10px">${ic('photo',15)} From Photos</button>
+      <button class="pbtn allow" data-wpclose style="margin-top:8px">Done</button>
     </div>`;
     scrim.classList.add('open');
-    scrim.querySelectorAll('[data-wp2]').forEach(b => b.onclick = () => { PREF.set('wallpaper', b.dataset.wp2); applyWallpaper(); openWallpaperSheet(); });
+    scrim.querySelectorAll('[data-wp2]').forEach(b => b.onclick = () => { PREF.set('wallpaperImg', null); PREF.set('wallpaper', b.dataset.wp2); applyWallpaper(); openWallpaperSheet(); });
+    scrim.querySelector('[data-wpphoto]').onclick = () => openPhotoPicker();
     scrim.querySelector('[data-wpclose]').onclick = () => {
       scrim.classList.remove('open');
       setTimeout(() => { if (!scrim.classList.contains('open')) scrim.innerHTML = ''; }, 200);
@@ -2651,6 +2682,7 @@
       <div class="th-grid">${themeChips}</div>
       <div class="section-head"><span class="eyebrow">Wallpaper</span></div>
       <div class="wp-grid">${swatches}</div>
+      <button class="mini-btn" id="wpFromPhotos" style="margin-top:10px">${ic('photo',14)} Choose from Photos</button>
       <div class="section-head"><span class="eyebrow">Live effects</span>
         <span class="muted" style="font-size:11px">ambient · rendered on-device</span></div>
       <div class="fx-grid">${fxChips}</div>
@@ -2682,8 +2714,9 @@
       <div style="height:8px"></div>`;
 
     $('#screenScroll').querySelectorAll('[data-wp]').forEach(b => b.onclick = () => {
-      PREF.set('wallpaper', b.dataset.wp); applyWallpaper(); renderPersonalize();
+      PREF.set('wallpaperImg', null); PREF.set('wallpaper', b.dataset.wp); applyWallpaper(); renderPersonalize();
     });
+    const wfp = $('#wpFromPhotos'); if (wfp) wfp.onclick = () => openPhotoPicker();
     $('#screenScroll').querySelectorAll('[data-th]').forEach(b => b.onclick = () => {
       PREF.set('theme', b.dataset.th); applyTheme(); renderPersonalize();
     });
