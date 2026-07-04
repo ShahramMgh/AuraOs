@@ -372,6 +372,13 @@
     box.classList.toggle('side-right', right);
     box.classList.toggle('side-left', !right);
   }
+  // Where the collapsed handle sits vertically — user-draggable, persisted, and
+  // clamped clear of the status bar and helm. Stored as a % of the screen height.
+  function applyInsightPos() {
+    const box = $('#insight'); if (!box) return;
+    const pct = Math.max(12, Math.min(88, PREF.get('insTop', 50)));
+    box.style.setProperty('--ins-top', pct + '%');
+  }
 
   function buildInsight() {
     const tabs = INS_SECTIONS.map(s =>
@@ -387,7 +394,34 @@
         <div class="ins-rail">${tabs}</div>
         <div class="ins-panel" id="insPanel"></div>
       </div>`;
-    $('#insHandle').onclick = () => { S.insTab = _insLast; updateInsight(); };
+    // The handle: a tap expands it; a vertical drag repositions it. We tell them
+    // apart by distance moved, and suppress the click that follows a real drag.
+    const handle = $('#insHandle'), box = $('#insight');
+    let dragging = false, movedFar = false, startY = 0;
+    handle.addEventListener('pointerdown', e => {
+      dragging = true; movedFar = false; startY = e.clientY;
+      try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    handle.addEventListener('pointermove', e => {
+      if (!dragging) return;
+      if (!movedFar && Math.abs(e.clientY - startY) > 6) { movedFar = true; box.classList.add('dragging'); }
+      if (movedFar) {
+        const r = device.getBoundingClientRect();
+        const pct = Math.max(12, Math.min(88, (e.clientY - r.top) / r.height * 100));
+        box.style.setProperty('--ins-top', pct + '%');
+      }
+    });
+    handle.addEventListener('pointerup', () => {
+      dragging = false;
+      if (movedFar) {
+        box.classList.remove('dragging');
+        PREF.set('insTop', parseFloat(box.style.getPropertyValue('--ins-top')) || 50);
+      }
+    });
+    handle.onclick = () => {
+      if (movedFar) { movedFar = false; return; }   // that was a drag, not a tap
+      S.insTab = _insLast; updateInsight();
+    };
     $$('#insight [data-ins]').forEach(b => b.onclick = () => {
       S.insTab = (S.insTab === b.dataset.ins) ? null : b.dataset.ins;
       if (S.insTab) _insLast = S.insTab;
@@ -396,6 +430,7 @@
     const scrim = $('#insScrim');
     if (scrim) scrim.onclick = () => { S.insTab = null; updateInsight(); };
     applyInsightSide();
+    applyInsightPos();
     updateInsight();
   }
 
@@ -408,8 +443,10 @@
 
   function updateInsight() {
     const box = $('#insight'); if (!box) return;
-    box.classList.toggle('hidden', S.locked);        // lock screen covers boot too
-    if (S.locked) S.insTab = null;
+    // Hidden while locked (covers boot too) or if the user hid the handle.
+    const hidden = S.locked || PREF.get('insHidden', false);
+    box.classList.toggle('hidden', hidden);
+    if (hidden) S.insTab = null;
     applyInsightSide();
     const app = insightCtx();
     const hd = box.querySelector('.ih-dot');
@@ -453,7 +490,8 @@
     else if (sec === 'sec') body = insSecBody(app);
     panel.innerHTML =
       `<div class="ip-head">${ic(meta.ic, 15)}<span class="ip-title">${meta.label}</span>
-         <span class="ip-ctx">${ctx}</span></div><div class="ip-body">${body}</div>`;
+         <span class="ip-ctx">${ctx}</span></div><div class="ip-body">${body}</div>
+       <button class="ins-hide" id="insHide">${ic('x', 12)} Hide this handle</button>`;
     wireInsight(sec, app);
   }
 
@@ -561,6 +599,11 @@
 
   function wireInsight(sec, app) {
     const panel = $('#insPanel'); if (!panel) return;
+    const hide = panel.querySelector('#insHide');
+    if (hide) hide.onclick = () => {
+      PREF.set('insHidden', true); S.insTab = null; updateInsight();
+      toast('Handle hidden — turn it back on in Personalize', '', 'shieldChk');
+    };
     if (sec === 'access' && app) {
       panel.querySelectorAll('[data-perm]').forEach(row => {
         row.querySelector('.ins-tgl').onclick = () => {
@@ -2456,6 +2499,7 @@
       `<button class="${l.id === lvl ? 'on acc' : ''}" data-fxlvl="${l.id}">${l.name}</button>`).join('')}</div>`;
 
     const insSide = PREF.get('insSide', 'left');
+    const insHidden = PREF.get('insHidden', false);
     const theme = PREF.get('theme', 'teal');
     const themeChips = THEMES.map(t => `
       <button class="th-chip ${t.id === theme ? 'on' : ''}" data-th="${t.id}" style="--c:${t.accent}">
@@ -2480,12 +2524,17 @@
           <span class="switch ${night ? 'on' : ''}"></span></button>
       </div>
       <div class="section-head"><span class="eyebrow">Insight margin</span>
-        <span class="muted" style="font-size:11px">privacy &amp; status rail</span></div>
-      <div class="card"><div class="row"><span class="glyph">${ic('shieldChk',18)}</span>
-        <span class="rtext"><div class="rtitle">Screen side</div>
-          <div class="rsub">Which edge the margin's handle lives on</div></span>
-        <div class="seg">${['left','right'].map(sd =>
-          `<button class="${insSide === sd ? 'on acc' : ''}" data-insside="${sd}">${cap(sd)}</button>`).join('')}</div></div></div>
+        <span class="muted" style="font-size:11px">privacy &amp; status handle</span></div>
+      <div class="card">
+        <button class="row tappable" data-insshow style="width:100%;text-align:left"><span class="glyph">${ic('shieldChk',18)}</span>
+          <span class="rtext"><div class="rtitle">Show handle</div>
+            <div class="rsub">The privacy &amp; status shortcut on screen · drag it up or down</div></span>
+          <span class="switch ${insHidden ? '' : 'on'}"></span></button>
+        <div class="row"><span class="glyph">${ic('layers',18)}</span>
+          <span class="rtext"><div class="rtitle">Screen side</div>
+            <div class="rsub">Which edge the handle lives on</div></span>
+          <div class="seg">${['left','right'].map(sd =>
+            `<button class="${insSide === sd ? 'on acc' : ''}" data-insside="${sd}">${cap(sd)}</button>`).join('')}</div></div></div>
       <div class="section-head"><span class="eyebrow">Home focus</span></div>
       <div class="card">${focusRow}</div>
       <div class="section-head"><span class="eyebrow">On the home screen</span>
@@ -2512,6 +2561,10 @@
     $('#screenScroll').querySelectorAll('[data-insside]').forEach(b => b.onclick = () => {
       PREF.set('insSide', b.dataset.insside); applyInsightSide(); updateInsight(); renderPersonalize();
     });
+    const isw = $('#screenScroll').querySelector('[data-insshow]');
+    if (isw) isw.onclick = () => {
+      PREF.set('insHidden', !PREF.get('insHidden', false)); updateInsight(); renderPersonalize();
+    };
     $('#focusSel').onchange = e => {
       PREF.set('focus', e.target.value);
       // keep the new focus out of the grid list

@@ -1905,8 +1905,11 @@ input  { font: inherit; }
 .mini-btn.accent:active { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 
 /* ── Insight margin — an edge privacy/status rail that collapses to a handle ─ */
-#insight { position: absolute; top: 50%; transform: translateY(-50%); z-index: 55;
-  display: flex; max-height: 82%; pointer-events: none; }   /* children opt back in */
+#insight { position: absolute; top: var(--ins-top, 50%); transform: translateY(-50%);
+  z-index: 55; display: flex; max-height: 82%; pointer-events: none;   /* children opt back in */
+  transition: top .22s var(--ease); }
+#insight.open { top: 50%; }              /* recenter when expanded so the panel always fits */
+#insight.dragging { transition: none; }  /* follow the finger 1:1 while dragging */
 #insight.side-left  { left: 0; }
 #insight.side-right { right: 0; }
 #insight.hidden { display: none; }
@@ -1919,8 +1922,10 @@ input  { font: inherit; }
                               color-mix(in srgb, var(--glass) 66%, transparent));
   backdrop-filter: blur(15px) saturate(1.1); -webkit-backdrop-filter: blur(15px) saturate(1.1);
   border: 1px solid var(--line); box-shadow: 0 2px 18px rgba(0, 0, 0, .24);
+  cursor: grab; touch-action: none;   /* vertical drag shouldn't scroll the page */
   transition: color .18s, transform .16s; }
 .ins-handle:active { transform: scale(.95); color: var(--text-0); }
+#insight.dragging .ins-handle { cursor: grabbing; transform: scale(1.04); }
 .ins-handle .ih-grip { width: 3px; height: 15px; border-radius: 3px;
   background: repeating-linear-gradient(var(--text-3) 0 2px, transparent 2px 4px); opacity: .85; }
 .ins-handle .ih-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
@@ -1989,6 +1994,10 @@ input  { font: inherit; }
   text-overflow: ellipsis; white-space: nowrap; }
 .ins-panel .ip-body { padding: 4px 13px 14px; }
 .ins-sec-lead { font-size: 11px; color: var(--text-2); padding: 6px 2px 10px; line-height: 1.44; }
+.ins-hide { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%;
+  padding: 11px; font-size: 11px; color: var(--text-3); border-top: 1px solid var(--line);
+  background: none; transition: color .15s; }
+.ins-hide:active { color: var(--text-1); }
 
 .ins-perm { display: flex; align-items: center; gap: 10px; padding: 9px 4px; }
 .ins-perm + .ins-perm { border-top: 1px solid var(--line); }
