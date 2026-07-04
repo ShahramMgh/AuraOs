@@ -195,6 +195,24 @@
     }
     return pages;
   }
+  // A home tile id is either a built-in app id, or "android:<package>" for an
+  // Android app installed from the App Store — resolve either to a tile object.
+  function resolveHomeApp(id) {
+    if (id && id.indexOf('android:') === 0) {
+      const pkg = id.slice(8), names = PREF.get('androidApps', {});
+      return { id, pkg, android: true, name: names[pkg] || pkg, glyph: 'android', color: '#2BA869' };
+    }
+    return Sov.app(id);
+  }
+  // Put a freshly-installed Android app onto the home screen (last page), the way
+  // a phone drops a new app on your home screen.
+  function addAndroidToHome(pkg, name) {
+    const id = 'android:' + pkg;
+    const names = PREF.get('androidApps', {}); names[pkg] = name || pkg; PREF.set('androidApps', names);
+    const pgs = homePagesIds().map(p => (p || []).slice());
+    if (!pgs.length) pgs.push([]);
+    if (!pgs.some(p => p.includes(id))) { pgs[pgs.length - 1].push(id); PREF.set('homePages', pgs); }
+  }
   function homeLayout() {
     const cfg = HOME_CFG || Sov._homeCfgSync();
     const apps = Sov.apps();
@@ -202,7 +220,7 @@
     const focus = byId(PREF.get('focus', null) || cfg.focus) || byId('assistant') || apps[0];
     const seen = new Set([focus.id]);
     let pages = homePagesIds().map(ids =>
-      (ids || []).map(byId).filter(a => a && !seen.has(a.id) && (seen.add(a.id), true)));
+      (ids || []).map(resolveHomeApp).filter(a => a && !seen.has(a.id) && (seen.add(a.id), true)));
     if (!pages.length) pages = [[]];
     if (pages.every(p => !p.length)) pages[0] = apps.filter(a => a.id !== focus.id);
     return { cfg, focus, pages };
@@ -1530,8 +1548,10 @@
       if (msgEl) msgEl.textContent = 'Resolving on ' + source + '…';
       const r = await Sov.androidStoreInstall(pkg);
       if (r && r.ok) {
-        toast('Installing ' + pkg + '…', 'good', 'store');
-        Sov.notify.push({ app: 'appstore', title: 'App Store', body: 'Installing ' + pkg, icon: 'store' });
+        const nm = (all.find(x => x.package === pkg) || {}).name || pkg;
+        addAndroidToHome(pkg, nm);   // the app lands on the home screen, like a phone
+        toast(nm + ' added to home', 'good', 'store');
+        Sov.notify.push({ app: 'appstore', title: 'App Store', body: nm + ' installed — on your home screen', icon: 'store' });
         renderAppStore();
       } else {
         toast((r && r.error) || 'Install failed', 'alert', 'x');
@@ -3066,6 +3086,13 @@
 
   async function launch(id) {
     if (S.homeEdit) return;          // in edit mode, taps rearrange — they don't launch
+    if (id && id.indexOf('android:') === 0) {   // an Android app tile on home
+      const a = resolveHomeApp(id);
+      const r = await Sov.androidLaunch(a.pkg);
+      if (r && r.ok) { openAppFrame(a); toast('Opening Android app…', '', 'android'); }
+      else toast((r && r.error) || 'Could not open', 'alert', 'x');
+      return;
+    }
     const app = Sov.app(id);
     if (!app) return;
     if (BUILTIN_SCREEN[id]) return go(BUILTIN_SCREEN[id]);
@@ -3148,10 +3175,11 @@
     photos:   { render: photosView,   wire: wirePhotos },
   };
   function placeholderView(app) {
+    const note = app.android ? 'Handed to the Android runtime (Waydroid).' : 'Running inside AuraOS.';
     return `<div class="af-placeholder">
       <div class="af-badge" style="--tint:${app.color}">${ic(app.glyph,30)}</div>
       <div class="af-name">${esc(app.name)}</div>
-      <div class="af-note">Running inside AuraOS.</div></div>`;
+      <div class="af-note">${note}</div></div>`;
   }
 
   function openAppFrame(app) {
