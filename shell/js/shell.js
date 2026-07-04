@@ -18,6 +18,8 @@
     insTab: null,         // which insight-margin section is expanded (or null)
     homeEdit: false,      // iOS/Android-style home edit mode (long-press to enter)
     pendingNote: null,    // a note to open on the next Notes render (deep search)
+    pendingBrowse: null,  // a query/URL to open on the next Browser open (search)
+    focusSearch: false,   // focus the search field on the next drawer render
   };
 
   /* ======================================================================
@@ -284,6 +286,7 @@
           <button class="aura-status" id="auraStatus" data-nav="permissions">${auraStatusHTML()}</button>
         </section>
         <div id="suggestSlot"></div>
+        ${S.homeEdit ? '' : `<button class="home-search" id="homeSearch">${ic('search',16)}<span>Search apps, files, everything</span></button>`}
         ${showFocus ? focusCardHTML(focus, cfg) : ''}
         <div class="home-pager" id="homePager">${pages.map((ps, pi) =>
           `<section class="home-page"><div class="tile-grid" data-page="${pi}">${ps.map(homeTile).join('')}</div></section>`).join('')}</div>
@@ -303,6 +306,7 @@
     $$('#homePager .tile-grid').forEach(g => enableTileSort(g));
     wireHomePager();
     wireHomeEdit();
+    const hs = $('#homeSearch'); if (hs) hs.onclick = () => openSearch();
     mountAura();
     maybeSuggest();   // the resident may gently offer a learned routine (async)
   }
@@ -906,6 +910,19 @@
       label: t.name, sub: 'Track', icon: 'music', run: () => launch('music') })));
     push('Photos', 'photo', (d.photos || []).filter(x => (x.name || '').toLowerCase().includes(q)).slice(0, 6).map(x => ({
       label: x.name, sub: 'Photo', icon: 'photo', run: () => launch('photos') })));
+    // Get apps you don't have yet — one-tap install from the App Store.
+    push('Get from App Store', 'store', (d.store || []).filter(a => !a.installed && ((a.name || '') + ' ' + (a.summary || '')).toLowerCase().includes(q)).slice(0, 5).map(a => ({
+      label: 'Install ' + a.name, sub: a.summary || a.package, icon: 'store',
+      run: async () => {
+        toast('Installing ' + a.name + '…', 'good', 'store');
+        const r = await Sov.androidStoreInstall(a.package);
+        if (r && r.ok) { addAndroidToHome(a.package, a.name); toast(a.name + ' added to home', 'good', 'store'); }
+        else toast((r && r.error) || 'Install failed', 'alert', 'x');
+      } })));
+    // Always offer a web search for the query.
+    g.push({ title: 'Web', icon: 'browser', entries: [{
+      label: 'Search the web for “' + q + '”', sub: 'Browser', icon: 'browser',
+      run: () => { S.pendingBrowse = q; launch('browser'); } }] });
     return g;
   }
   function spotlightMatches(q) {
@@ -919,6 +936,10 @@
     }).filter(x => x.score > 0).sort((a, b) => b.score - a.score).map(x => x.e);
   }
 
+  // Open the universal search (the drawer) with the field focused — from the
+  // home search pill or a swipe.
+  function openSearch() { S.focusSearch = true; go('drawer'); }
+
   async function renderDrawer(filter = '') {
     if (INSTALLED === null) {
       INSTALLED = [];
@@ -930,13 +951,14 @@
       _androidApps = [];
       try { _androidApps = await Sov.androidApps(); } catch (e) {}
     }
-    if (_srch === null) {   // deep-search content: notes, events, messages, music, photos
-      _srch = { notes: [], events: [], sms: [], music: [], photos: [] };
+    if (_srch === null) {   // deep-search content: notes, events, messages, music, photos, store
+      _srch = { notes: [], events: [], sms: [], music: [], photos: [], store: [] };
       try { _srch.notes = await Sov.notes.list(); } catch (e) {}
       try { _srch.events = await Sov.calendar.list(); } catch (e) {}
       try { _srch.sms = (await Sov.sms.list()).messages || []; } catch (e) {}
       try { _srch.music = (await Sov.music()).items || []; } catch (e) {}
       try { _srch.photos = (await Sov.photos()).items || []; } catch (e) {}
+      try { _srch.store = (await Sov.androidStoreCatalog('')).apps || []; } catch (e) {}
     }
     if (_spotContacts === null) {   // fold contacts into search — call from a search
       _spotContacts = [];
@@ -1022,6 +1044,7 @@
     input.oninput = () => renderDrawer(input.value);
     input.onkeydown = e => e.stopPropagation();
     if (filter) { input.focus(); input.setSelectionRange(filter.length, filter.length); }
+    else if (S.focusSearch) { S.focusSearch = false; input.focus(); }
     bindLaunchers($('#v-drawer'));
     $('#drawerScroll').querySelectorAll('[data-deep]').forEach(b => b.onclick = () => {
       const [gi, i] = b.dataset.deep.split(':').map(Number); deep[gi].entries[i].run();
@@ -3519,6 +3542,7 @@
     $('#brReload').onclick = () => { if (frame.src) { const s = frame.src; frame.src = 'about:blank'; setTimeout(() => { frame.src = s; }, 30); } };
     $('#brBack').onclick = () => { try { frame.contentWindow.history.back(); } catch (_) { start.style.display = ''; frame.removeAttribute('src'); } };
     $$('#brStart [data-url]').forEach(b => b.onclick = () => goURL(b.dataset.url));
+    if (S.pendingBrowse) { const bq = S.pendingBrowse; S.pendingBrowse = null; goURL(bq); }   // from search
   }
 
   /* ---- Camera — the real webcam via getUserMedia (lights the sensor dot) -- */

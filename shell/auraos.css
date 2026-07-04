@@ -2321,3 +2321,10 @@ input  { font: inherit; }
 
 /* Real Android icon in the app-frame badge */
 .af-placeholder .af-badge .af-badge-img { width: 100%; height: 100%; border-radius: 16px; object-fit: cover; display: block; }
+
+/* Home search pill (opens the universal search) */
+.home-search { display: flex; align-items: center; gap: 9px; width: 100%; padding: 11px 14px;
+  margin: 2px 0 12px; border-radius: 14px; background: var(--glass); border: 1px solid var(--line);
+  color: var(--text-2); font-size: 13px; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.home-search svg { flex: 0 0 auto; }
+.home-search:active { border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--text-1); }
