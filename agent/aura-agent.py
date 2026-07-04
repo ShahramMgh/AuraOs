@@ -24,6 +24,7 @@ from urllib.parse import urlsplit, parse_qs
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ai_engine import AIEngine, CAPABILITIES   # Phase II — Native Intelligence Layer
 from waydroid_bridge import WaydroidBridge      # Phase III — Native Android Layer
+from modem import Modem                          # Cellular (A7670E) — voice/SMS/GPS
 
 # Loopback by default. Override with AURA_AGENT_HOST=0.0.0.0 to expose the
 # shell on the local network — but note: static assets are public and the
@@ -78,6 +79,9 @@ AI = AIEngine(STATE_DIR)
 # The bridge keeps the heavy Android session off unless an app is on screen and
 # reclaims its memory when idle, so the shell stays fluid (see waydroid_bridge).
 ANDROID = WaydroidBridge(STATE_DIR)
+# Cellular modem (SIMCom A7670E): voice, SMS and GNSS via ModemManager, exposed
+# at /api/phone/*, /api/sms and /api/location. Degrades honestly when absent.
+MODEM = Modem()
 
 # ---- app catalogue: shell id -> launch command (first found is used) --------
 # On a real device these resolve to Flatpak app-ids or binaries. Anything not
@@ -1122,6 +1126,15 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/android/store/catalog":
             q = parse_qs(urlsplit(self.path).query)
             return self._send(200, ANDROID.store_catalog(q.get("q", [""])[0]))
+        # ---- Cellular modem (A7670E) ----
+        if p == "/api/phone/status":
+            return self._send(200, MODEM.status())
+        if p == "/api/phone/state":
+            return self._send(200, MODEM.call_state())
+        if p == "/api/sms":
+            return self._send(200, MODEM.sms_list())
+        if p == "/api/location":
+            return self._send(200, MODEM.location())
         return self._serve_static(p)
 
     def _vault_used(self):
@@ -1320,6 +1333,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, res)
         if p == "/api/android/show":
             return self._send(200, ANDROID.show_full_ui())
+        # ---- Cellular modem (A7670E): voice + SMS ----
+        if p == "/api/phone/dial":
+            return self._send(200, MODEM.call(body.get("number", "")))
+        if p == "/api/phone/answer":
+            return self._send(200, MODEM.answer())
+        if p == "/api/phone/hangup":
+            return self._send(200, MODEM.hangup())
+        if p == "/api/sms/send":
+            return self._send(200, MODEM.sms_send(body.get("number", ""), body.get("text", "")))
 
         return self._send(404, {"error": "unknown endpoint"})
 

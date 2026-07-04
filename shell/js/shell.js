@@ -3163,14 +3163,14 @@
   // Each catalog app has an in-phone view (it runs INSIDE the phone — never a
   // desktop app on the host). Browser is a real iframe, Camera a real webcam,
   // Maps a real OSM embed; the rest are functional in-phone experiences.
-  let _camStream = null, _musicTimer = null;
+  let _camStream = null, _musicTimer = null, _phTimer = null, _msTimer = null, _phNum = '';
   const APP_VIEWS = {
     browser:  { render: browserView,  wire: wireBrowser },
     camera:   { render: cameraView,   wire: wireCamera,  close: stopCam },
     maps:     { render: mapsView },
     music:    { render: musicView,    wire: wireMusic,   close: () => clearInterval(_musicTimer) },
-    phone:    { render: phoneView,    wire: wirePhone },
-    messages: { render: messagesView, wire: wireMessages },
+    phone:    { render: phoneView,    wire: wirePhone,     close: () => clearInterval(_phTimer) },
+    messages: { render: messagesView, wire: wireMessages,  close: () => clearInterval(_msTimer) },
     contacts: { render: contactsView, wire: wireContacts },
     photos:   { render: photosView,   wire: wirePhotos },
   };
@@ -3348,42 +3348,88 @@
     paint();
   }
 
-  /* ---- Phone — a dialer keypad -------------------------------------------- */
-  function phoneView() {
+  /* ---- Phone — a real dialer + in-call UI (SIMCom A7670E via ModemManager) - */
+  function phoneView() { return `<div class="ph-wrap" id="phWrap"></div>`; }
+  async function wirePhone() {
+    const st = await Sov.phone.status();
+    const wrap = $('#phWrap'); if (!wrap) return;
+    if (st && st.present === false && Sov.mode === 'live') {
+      wrap.innerHTML = `<div class="af-placeholder"><div class="af-name">No cellular modem</div>
+        <div class="af-note">${esc(st.reason || 'Insert a SIM and connect the A7670E.')}</div></div>`;
+      return;
+    }
+    let mode = '';
     const keys = ['1','2','3','4','5','6','7','8','9','*','0','#'];
     const sub = { '2':'ABC','3':'DEF','4':'GHI','5':'JKL','6':'MNO','7':'PQRS','8':'TUV','9':'WXYZ' };
-    return `
-      <div class="ph-num" id="phNum"></div>
-      <div class="ph-pad">${keys.map(k => `<button class="ph-key" data-k="${k}"><span class="ph-d">${k}</span><span class="ph-s">${sub[k] || ''}</span></button>`).join('')}</div>
-      <div class="ph-actions"><button class="ph-del" id="phDel">${ic('back',18)}</button><button class="ph-call" id="phCall">${ic('phone',24)}</button><span style="width:44px"></span></div>`;
-  }
-  function wirePhone() {
-    const num = $('#phNum');
-    $$('#afView [data-k]').forEach(b => b.onclick = () => { num.textContent += b.dataset.k; });
-    $('#phDel').onclick = () => { num.textContent = num.textContent.slice(0, -1); };
-    $('#phCall').onclick = () => { if (num.textContent) toast('Calling ' + num.textContent + '…', '', 'phone'); };
+    const paintKeypad = () => {
+      wrap.innerHTML = `
+        <div class="ph-status">${st && st.operator ? esc(st.operator) : '—'}${st && st.signal != null ? ' · ' + st.signal + '%' : ''}${st && st.tech ? ' · ' + esc(String(st.tech).toUpperCase()) : ''}</div>
+        <div class="ph-num" id="phNum">${esc(_phNum)}</div>
+        <div class="ph-pad">${keys.map(k => `<button class="ph-key" data-k="${k}"><span class="ph-d">${k}</span><span class="ph-s">${sub[k] || ''}</span></button>`).join('')}</div>
+        <div class="ph-actions"><button class="ph-del" id="phDel">${ic('back',18)}</button><button class="ph-call" id="phCall">${ic('phone',24)}</button><span style="width:44px"></span></div>`;
+      $$('#phWrap [data-k]').forEach(b => b.onclick = () => { _phNum += b.dataset.k; $('#phNum').textContent = _phNum; });
+      $('#phDel').onclick = () => { _phNum = _phNum.slice(0, -1); $('#phNum').textContent = _phNum; };
+      $('#phCall').onclick = async () => { if (!_phNum) return; const r = await Sov.phone.dial(_phNum); if (!(r && r.ok)) toast((r && r.error) || 'Call failed', 'alert', 'x'); };
+    };
+    const paintCall = call => {
+      const incoming = call.direction === 'incoming' && call.state !== 'active';
+      wrap.innerHTML = `
+        <div class="ph-incall">
+          <div class="ph-cnum">${esc(call.number || 'Unknown')}</div>
+          <div class="ph-cstate">${incoming ? 'Incoming call' : (call.state === 'active' ? 'On call' : cap(call.state || 'Calling'))}</div>
+          <div class="ph-cbtns">
+            ${incoming ? `<button class="ph-answer" id="phAns">${ic('phone',24)}</button>` : ''}
+            <button class="ph-end" id="phEnd">${ic('phone',24)}</button>
+          </div></div>`;
+      const a = $('#phAns'); if (a) a.onclick = () => Sov.phone.answer();
+      $('#phEnd').onclick = async () => { await Sov.phone.hangup(); _phNum = ''; };
+    };
+    const refresh = async () => {
+      if (S.appOpen !== 'phone') return;
+      const s = await Sov.phone.state();
+      const call = s && s.calls && s.calls.find(c => c.state !== 'terminated');
+      if (call) { mode = 'call'; paintCall(call); }
+      else if (mode !== 'keypad') { mode = 'keypad'; paintKeypad(); }
+    };
+    mode = 'keypad'; paintKeypad();
+    clearInterval(_phTimer); _phTimer = setInterval(refresh, 2000); refresh();
   }
 
-  /* ---- Messages — a chat thread ------------------------------------------- */
-  function messagesView() {
-    return `
-      <div class="ms-thread" id="msThread">
-        <div class="ms-in">Hey! Is the new AuraOS build ready?</div>
-        <div class="ms-out">Yep — Android apps and the App Store just landed.</div>
-        <div class="ms-in">Nice. Does the browser open in the phone now?</div>
-      </div>
-      <div class="ms-compose"><input id="msIn" placeholder="Message" autocomplete="off"><button class="mini-btn" id="msSend">Send</button></div>`;
-  }
-  function wireMessages() {
-    const thread = $('#msThread'), inp = $('#msIn');
-    const send = () => {
-      const v = (inp.value || '').trim(); if (!v) return;
-      const d = document.createElement('div'); d.className = 'ms-out'; d.textContent = v;
-      thread.appendChild(d); inp.value = ''; thread.scrollTop = thread.scrollHeight;
-      setTimeout(() => { const r = document.createElement('div'); r.className = 'ms-in'; r.textContent = 'Got it 👍'; thread.appendChild(r); thread.scrollTop = thread.scrollHeight; }, 900);
+  /* ---- Messages — real SMS over the A7670E (ModemManager) ------------------ */
+  function messagesView() { return `<div class="ms-wrap" id="msWrap"></div>`; }
+  async function wireMessages() {
+    const render = async () => {
+      const r = await Sov.sms.list();
+      const wrap = $('#msWrap'); if (!wrap) return;
+      if (r && r.present === false && Sov.mode === 'live') {
+        wrap.innerHTML = `<div class="af-placeholder"><div class="af-name">No messages</div>
+          <div class="af-note">Insert a SIM and connect the A7670E.</div></div>`;
+        return;
+      }
+      const msgs = (r && r.messages) || [];
+      wrap.innerHTML = `
+        <div class="ms-thread" id="msThread">${msgs.length
+          ? msgs.map(m => `<div class="ms-${m.sent ? 'out' : 'in'}"><span class="ms-meta">${esc(m.number || '')}</span>${esc(m.text || '')}</div>`).join('')
+          : '<div class="row muted" style="padding:24px;text-align:center">No messages yet.</div>'}</div>
+        <div class="ms-compose">
+          <input id="msTo" class="ms-to" placeholder="To (number)" autocomplete="off">
+          <input id="msIn" placeholder="Message" autocomplete="off">
+          <button class="mini-btn" id="msSend">Send</button>
+        </div>`;
+      const send = async () => {
+        const to = ($('#msTo').value || '').trim(), tx = ($('#msIn').value || '').trim();
+        if (!to || !tx) { toast('Enter a number and a message', 'alert', 'x'); return; }
+        const rr = await Sov.sms.send(to, tx);
+        if (rr && rr.ok) { $('#msIn').value = ''; toast('Message sent', 'ok', 'check'); render(); }
+        else toast((rr && rr.error) || 'Send failed', 'alert', 'x');
+      };
+      $('#msSend').onclick = send;
+      $('#msIn').onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') send(); };
+      $('#msTo').onkeydown = e => e.stopPropagation();
+      const th = $('#msThread'); if (th) th.scrollTop = th.scrollHeight;
     };
-    $('#msSend').onclick = send;
-    inp.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') send(); };
+    await render();
+    clearInterval(_msTimer); _msTimer = setInterval(() => { if (S.appOpen === 'messages') render(); }, 5000);
   }
 
   /* ---- Contacts — a list --------------------------------------------------- */

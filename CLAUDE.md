@@ -14,6 +14,8 @@ shell and — in Phase II — a native intelligence layer.
 - **`SHELL.md`** — the Aura Shell (UI), how it boots, and how to run it.
 - **`ANDROID.md`** — the Native Android layer (Waydroid), Phase III: how Android
   apps run natively while the device stays light.
+- **`MODEM.md`** — the Cellular layer (SIMCom A7670E): data · voice · SMS · GPS
+  via ModemManager, exposed at `/api/phone/*`, `/api/sms`, `/api/location`.
 - **`TESTING-AND-DEPLOYMENT.md`** — the three test tiers (container → VM → Pi 5).
 
 ## The line we hold

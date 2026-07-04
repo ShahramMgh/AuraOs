@@ -242,6 +242,16 @@ const Sov = (() => {
     ],
   };
 
+  // Cellular (A7670E) sim state — a registered modem so Phone/Messages are
+  // fully explorable in the browser preview; live mode uses ModemManager.
+  const simModem = {
+    call: null,
+    sms: [
+      { id: 's1', number: '+1 555 0142', text: 'Landing in 20 — see you at the gate.', sent: false, unread: true, time: '' },
+      { id: 's2', number: '+1 555 0173', text: 'Thanks for the update!', sent: true, unread: false, time: '' },
+    ],
+  };
+
   const api = {
     onUpdate(fn) { listeners.add(fn); return () => listeners.delete(fn); },
     get() { return snapshot(); },
@@ -441,6 +451,46 @@ const Sov = (() => {
         simAndroid.apps.push({ name: hit.name, package: hit.package });
       }
       return { ok: true, sim: true };
+    },
+
+    /* ---- Cellular modem (A7670E): phone · SMS · GPS -------------------------
+       Live goes through the agent → ModemManager. In sim we model a registered
+       modem so the Phone/Messages apps are fully explorable in the browser. */
+    phone: {
+      async status() {
+        if (mode === 'live') { const s = await getJSON('/api/phone/status'); if (s) return s; }
+        return { available: true, present: true, state: 'registered', operator: 'AuraNet',
+                 tech: 'lte', signal: 82, number: '+1 555 0100', dataConnected: true, sim: true };
+      },
+      async dial(number) {
+        if (mode === 'live') return post('/api/phone/dial', { number }, 30000, 1);
+        simModem.call = { number, state: 'dialing', direction: 'outgoing' };
+        setTimeout(() => { if (simModem.call) simModem.call.state = 'active'; }, 1200);
+        return { ok: true, sim: true };
+      },
+      async answer() { if (mode === 'live') return post('/api/phone/answer', {}, 20000, 1);
+        if (simModem.call) simModem.call.state = 'active'; return { ok: true, sim: true }; },
+      async hangup() { if (mode === 'live') return post('/api/phone/hangup', {}, 20000, 1);
+        simModem.call = null; return { ok: true, sim: true }; },
+      async state() {
+        if (mode === 'live') { const s = await getJSON('/api/phone/state'); if (s) return s; }
+        return { available: true, calls: simModem.call ? [simModem.call] : [], sim: true };
+      },
+    },
+    sms: {
+      async list() {
+        if (mode === 'live') { const s = await getJSON('/api/sms'); if (s) return s; }
+        return { available: true, present: true, messages: simModem.sms.map(m => ({ ...m })) };
+      },
+      async send(number, text) {
+        if (mode === 'live') return post('/api/sms/send', { number, text }, 45000, 1);
+        simModem.sms.push({ id: 's' + Date.now(), number, text, sent: true, unread: false, time: '' });
+        return { ok: true, sim: true };
+      },
+    },
+    async location() {
+      if (mode === 'live') { const s = await getJSON('/api/location'); if (s) return s; }
+      return { available: true, present: true, fix: { lat: 51.5024, lon: -0.1348, alt: '11' }, sim: true };
     },
 
     // called by shell when an app actually acquires a sensor (after grant)

@@ -2204,3 +2204,21 @@ input  { font: inherit; }
   background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .wp-sheet { width: 300px; max-width: 86vw; }
 .wp-sheet .wp-grid { margin-top: 10px; }
+
+/* Phone (real, A7670E) + Messages additions */
+.ph-wrap, .ms-wrap { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.ph-status { text-align: center; font-size: 11px; color: var(--text-2); font-family: var(--mono);
+  padding: 12px 10px 2px; letter-spacing: .03em; }
+.ph-incall { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 30px; }
+.ph-cnum { font-size: 26px; color: var(--text-0); font-family: var(--mono); text-align: center; word-break: break-all; }
+.ph-cstate { font-size: 13px; color: var(--text-2); }
+.ph-cbtns { display: flex; gap: 40px; margin-top: 40px; }
+.ph-answer, .ph-end { width: 64px; height: 64px; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; color: #04121a; box-shadow: 0 10px 26px -8px rgba(0,0,0,.5); }
+.ph-answer { background: var(--ok); }
+.ph-end { background: var(--alert); transform: rotate(135deg); }
+.ph-answer:active, .ph-end:active { transform: scale(.94); }
+.ph-end:active { transform: rotate(135deg) scale(.94); }
+.ms-to { flex: 0 0 auto; width: 118px; height: 36px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--s1); color: var(--text-0); padding: 0 12px; font-size: 13px; }
+.ms-meta { display: block; font-size: 9.5px; opacity: .6; margin-bottom: 3px; font-family: var(--mono); }

@@ -154,6 +154,10 @@ WAYDROID_MEM_MAX="${WAYDROID_MEM_MAX:-2560M}" \
 WAYDROID_IDLE="${WAYDROID_IDLE:-600}" \
   chroot "$ROOTFS" /bin/bash /aura/60-waydroid.sh
 
+log "STEP 6c — Cellular layer (SIMCom A7670E — data · voice · SMS · GPS)"
+AURA_APN="${AURA_APN:-}" AURA_APN_USER="${AURA_APN_USER:-}" AURA_APN_PASS="${AURA_APN_PASS:-}" \
+  chroot "$ROOTFS" /bin/bash /aura/65-modem.sh
+
 log "STEP 7 — Native Intelligence Layer (Ollama + default light model)"
 AURA_AI_MODEL="${AURA_AI_MODEL:-llama3.2:1b}" \
   chroot "$ROOTFS" /bin/bash /aura/80-ai-engine.sh
