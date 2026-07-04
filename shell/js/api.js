@@ -595,6 +595,10 @@ const Sov = (() => {
         if (mode === 'live') { const r = await getJSON('/api/files/read?path=' + encodeURIComponent(path || '')); if (r) return r; }
         return SIMFILES.read(path);
       },
+      async search(q) {   // deep search: filename search under HOME
+        if (mode === 'live') { const r = await getJSON('/api/files/search?q=' + encodeURIComponent(q || '')); if (r) return r.results || []; }
+        return [];
+      },
       async op(op, path, dest) {
         if (mode === 'live') { const r = await post('/api/files/op', { op, path, dest }); if (r) return r; }
         return SIMFILES.op(op, path, dest);

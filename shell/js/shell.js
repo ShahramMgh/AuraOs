@@ -17,6 +17,7 @@
     ctlTab: 'controls',   // which pull-down panel is showing: 'notifs' | 'controls'
     insTab: null,         // which insight-margin section is expanded (or null)
     homeEdit: false,      // iOS/Android-style home edit mode (long-press to enter)
+    pendingNote: null,    // a note to open on the next Notes render (deep search)
   };
 
   /* ======================================================================
@@ -848,7 +849,7 @@
   // Real installed apps, discovered once from the agent's capability registry
   // and cached. This is what makes Ubuntu's own apps (Software, Text Editor,
   // LibreOffice, …) live inside the OS's launcher.
-  let INSTALLED = null, _androidApps = null;
+  let INSTALLED = null, _androidApps = null, _srch = null;
   const catIcon = cats => {
     const c = (cats || []).map(x => x.toLowerCase());
     if (c.some(x => /audio|video|music|player/.test(x))) return 'music';
@@ -887,6 +888,26 @@
       { label: 'Toggle Wi-Fi', sub: 'Action', icon: 'wifi', kw: 'wifi on off internet', run: () => { const v = !Sov.get().net.wifi; Sov.setToggle('wifi', v); toast(`Wi-Fi ${v ? 'on' : 'off'}`, 'ok', 'wifi'); } },
     ];
   }
+  // Deep search across your content. Each entry has a run() that opens the right
+  // place: notes → that note, events → the calendar on that day, etc.
+  function buildDeep(q) {
+    const g = [], d = _srch || {};
+    const push = (title, icon, entries) => { if (entries.length) g.push({ title, icon, entries }); };
+    push('Notes', 'note', (d.notes || []).filter(n => (n.text || '').toLowerCase().includes(q)).slice(0, 6).map(n => ({
+      label: ((n.text || '').trim().split('\n')[0] || 'Untitled note').slice(0, 52), sub: 'Note', icon: 'note',
+      run: () => { S.pendingNote = n.id; go('notes'); } })));
+    push('Events', 'calendar', (d.events || []).filter(e => ((e.title || '') + ' ' + (e.notes || '')).toLowerCase().includes(q)).slice(0, 6).map(e => ({
+      label: e.title || 'Event', sub: (e.date || '') + (e.time ? ' · ' + e.time : ''), icon: 'calendar',
+      run: () => { _calSel = e.date; _calYM = e.date ? { y: +e.date.slice(0, 4), m: +e.date.slice(5, 7) - 1 } : null; go('calendar'); } })));
+    push('Messages', 'msg', (d.sms || []).filter(m => ((m.text || '') + ' ' + (m.number || '')).toLowerCase().includes(q)).slice(0, 6).map(m => ({
+      label: m.text || '(no text)', sub: (m.sent ? 'To ' : 'From ') + (m.number || ''), icon: 'msg',
+      run: () => launch('messages') })));
+    push('Music', 'music', (d.music || []).filter(t => (t.name || '').toLowerCase().includes(q)).slice(0, 6).map(t => ({
+      label: t.name, sub: 'Track', icon: 'music', run: () => launch('music') })));
+    push('Photos', 'photo', (d.photos || []).filter(x => (x.name || '').toLowerCase().includes(q)).slice(0, 6).map(x => ({
+      label: x.name, sub: 'Photo', icon: 'photo', run: () => launch('photos') })));
+    return g;
+  }
   function spotlightMatches(q) {
     if (!q) return [];
     return spotlightIndex().map(e => {
@@ -908,6 +929,14 @@
     if (_androidApps === null) {   // installed Android apps, unified into the app list
       _androidApps = [];
       try { _androidApps = await Sov.androidApps(); } catch (e) {}
+    }
+    if (_srch === null) {   // deep-search content: notes, events, messages, music, photos
+      _srch = { notes: [], events: [], sms: [], music: [], photos: [] };
+      try { _srch.notes = await Sov.notes.list(); } catch (e) {}
+      try { _srch.events = await Sov.calendar.list(); } catch (e) {}
+      try { _srch.sms = (await Sov.sms.list()).messages || []; } catch (e) {}
+      try { _srch.music = (await Sov.music()).items || []; } catch (e) {}
+      try { _srch.photos = (await Sov.photos()).items || []; } catch (e) {}
     }
     if (_spotContacts === null) {   // fold contacts into search — call from a search
       _spotContacts = [];
@@ -958,6 +987,18 @@
     const instHTML = allRows.length
       ? `<div class="lx-cat">Apps · ${allRows.length}</div><div class="card">${allRows.join('')}</div>` : '';
 
+    // Deep search: your actual content — notes, events, messages, music, photos.
+    // Each result opens the right place.
+    const deep = q ? buildDeep(q) : [];
+    const deepHTML = deep.map((g, gi) => `
+      <div class="lx-cat">${esc(g.title)} · ${g.entries.length}</div>
+      <div class="card">${g.entries.map((e, i) => `
+        <button class="row tappable" data-deep="${gi}:${i}" style="width:100%;text-align:left">
+          <span class="glyph">${ic(e.icon, 18)}</span>
+          <span class="rtext"><div class="rtitle">${esc(e.label)}</div>
+            <div class="rsub">${esc(e.sub)}</div></span>
+          <span class="chev">${ic('chev', 16)}</span></button>`).join('')}</div>`).join('');
+
     // Spotlight: settings pages + quick actions matching the query.
     const spots = spotlightMatches(q);
     const spotHTML = spots.length ? `
@@ -969,19 +1010,34 @@
             <div class="rsub">${esc(s.sub)}</div></span>
           <span class="chev">${ic('chev', 16)}</span></button>`).join('')}</div>` : '';
 
-    const nothing = !grid && !instHTML && !spotHTML
+    const nothing = !grid && !instHTML && !spotHTML && !deepHTML
       ? `<div class="lx-none">Nothing matches “${esc(filter)}”.</div>` : '';
 
     $('#drawerScroll').innerHTML = `
       <div class="lx-search">${ic('search',18)}
-        <input id="lxInput" placeholder="Search apps, settings, actions" value="${esc(filter)}" autocomplete="off"></div>
-      ${spotHTML}${grid}${nothing}${instHTML}
+        <input id="lxInput" placeholder="Search apps, contacts, notes, files…" value="${esc(filter)}" autocomplete="off"></div>
+      ${grid}${instHTML}${deepHTML}<div id="srchFiles"></div>${spotHTML}${nothing}
     `;
     const input = $('#lxInput');
     input.oninput = () => renderDrawer(input.value);
     input.onkeydown = e => e.stopPropagation();
     if (filter) { input.focus(); input.setSelectionRange(filter.length, filter.length); }
     bindLaunchers($('#v-drawer'));
+    $('#drawerScroll').querySelectorAll('[data-deep]').forEach(b => b.onclick = () => {
+      const [gi, i] = b.dataset.deep.split(':').map(Number); deep[gi].entries[i].run();
+    });
+    // Files: searched on the agent (async) so typing stays snappy; fill when ready.
+    if (q.length >= 2) Sov.files.search(q).then(res => {
+      const box = $('#srchFiles'); if (!box || input.value.trim().toLowerCase() !== q) return;
+      if (!res.length) { box.innerHTML = ''; return; }
+      box.innerHTML = `<div class="lx-cat">Files · ${res.length}</div><div class="card">${res.slice(0, 12).map(f => `
+        <button class="row tappable" data-file="${esc(f.dir)}" style="width:100%;text-align:left">
+          <span class="glyph">${ic('file', 18)}</span>
+          <span class="rtext"><div class="rtitle">${esc(f.name)}</div>
+            <div class="rsub mono" style="opacity:.6">${esc(f.dir)}</div></span>
+          <span class="chev">${ic('chev', 16)}</span></button>`).join('')}</div>`;
+      box.querySelectorAll('[data-file]').forEach(b => b.onclick = () => { S.fmPath = b.dataset.file; go('files'); });
+    });
     $('#drawerScroll').querySelectorAll('[data-spot]').forEach(b => b.onclick = () => spots[+b.dataset.spot].run());
     // launch real installed apps through the agent (best-effort GUI launch)
     $('#drawerScroll').querySelectorAll('[data-desktop]').forEach(b => b.onclick = async () => {
@@ -3051,6 +3107,7 @@
     $('#screenScroll').querySelectorAll('[data-note]').forEach(b => b.onclick = () => openNote(b.dataset.note));
     const nn = $('#screenScroll').querySelector('[data-note-new]');
     if (nn) nn.onclick = () => openNote('');
+    if (S.pendingNote != null) { const id = S.pendingNote; S.pendingNote = null; openNote(id); }   // deep-search jump
   }
   async function openNote(nid) {
     const data = nid ? await Sov.notes.get(nid) : { id: '', text: '' };

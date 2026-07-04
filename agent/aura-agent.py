@@ -575,6 +575,28 @@ def calendar_op(body):
     return {"ok": True, "events": lst}
 
 
+def files_search(q, limit=120):
+    """Filename search under HOME for deep search. Bounded: skips heavy/hidden
+    dirs and caps results so it stays fast. Never raises."""
+    q = (q or "").strip().lower()
+    if len(q) < 2:
+        return {"results": []}
+    skip = {".git", "node_modules", ".cache", "__pycache__", ".local", ".config",
+            "rootfs", ".gradle", ".npm", "snap"}
+    out = []
+    try:
+        for root, dirs, files in os.walk(HOME):
+            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in skip]
+            for name in files:
+                if q in name.lower():
+                    out.append({"name": name, "path": os.path.join(root, name), "dir": root})
+                    if len(out) >= limit:
+                        return {"results": out}
+    except Exception:
+        pass
+    return {"results": out}
+
+
 def _fm_resolve(path):
     """Resolve a request path to an absolute path, defaulting to HOME."""
     if not path:
@@ -1230,6 +1252,9 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/files/read":
             q = parse_qs(urlsplit(self.path).query)
             return self._send(200, fm_read(q.get("path", [""])[0]))
+        if p == "/api/files/search":
+            q = parse_qs(urlsplit(self.path).query)
+            return self._send(200, files_search(q.get("q", [""])[0]))
         # ---- capability registry + notes ----
         if p == "/api/capabilities":
             return self._send(200, cached("caps", 20, read_capabilities))
