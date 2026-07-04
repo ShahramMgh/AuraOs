@@ -2274,3 +2274,8 @@ input  { font: inherit; }
 .wp-photo { aspect-ratio: 1; border-radius: 9px; overflow: hidden; background: var(--s2); }
 .wp-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .wp-photo:active { transform: scale(.96); }
+
+/* Real Android app icon on a home tile (overlays the glyph; removed if it 404s) */
+.tile-ic { position: relative; }
+.tile-img { position: absolute; inset: 0; margin: auto; width: 30px; height: 30px;
+  border-radius: 8px; object-fit: cover; }

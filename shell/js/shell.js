@@ -326,9 +326,12 @@
   function homeTile(app) {
     const using = Sov.activeSensorsFor(app.id).length ? 'using' : '';
     const del = S.homeEdit ? `<span class="tile-x" data-hdel="${app.id}" aria-label="Remove">${ic('x', 11)}</span>` : '';
+    // Android apps show their own real icon when we can resolve it; else a glyph.
+    const iconUrl = app.android && Sov.appIconUrl ? Sov.appIconUrl('waydroid.' + app.pkg) : null;
+    const img = iconUrl ? `<img class="tile-img" src="${iconUrl}" onerror="this.remove()" alt="">` : '';
     return `
       <button class="tile ${using}" data-launch="${app.id}" style="--col:${app.color}">
-        ${del}<span class="tile-ic"><span class="tile-dot"></span>${ic(app.glyph, 24)}</span>
+        ${del}<span class="tile-ic"><span class="tile-dot"></span>${ic(app.glyph, 24)}${img}</span>
         <span class="tile-lbl">${esc(app.name)}</span>
       </button>`;
   }
@@ -3200,7 +3203,7 @@
   const APP_VIEWS = {
     browser:  { render: browserView,  wire: wireBrowser },
     camera:   { render: cameraView,   wire: wireCamera,  close: stopCam },
-    maps:     { render: mapsView },
+    maps:     { render: mapsView,     wire: wireMaps },
     music:    { render: musicView,    wire: wireMusic,   close: () => { clearInterval(_musicTimer); if (_audio) { try { _audio.pause(); } catch (e) {} _audio = null; } } },
     phone:    { render: phoneView,    wire: wirePhone,     close: () => clearInterval(_phTimer) },
     messages: { render: messagesView, wire: wireMessages,  close: () => clearInterval(_msTimer) },
@@ -3316,20 +3319,25 @@
       if (msg) { msg.textContent = 'No camera available (or access was declined).'; msg.classList.add('show'); }
       return;
     }
-    snap.onclick = () => {
+    snap.onclick = async () => {
       if (!v.videoWidth) return;
       c.width = v.videoWidth; c.height = v.videoHeight;
       c.getContext('2d').drawImage(v, 0, 0);
       c.classList.add('show'); reset.style.display = '';
-      toast('Photo captured', 'ok', 'check');
+      const r = await Sov.savePhoto(c.toDataURL('image/jpeg', 0.92));
+      toast(r && r.ok ? 'Saved to Photos' : 'Photo captured', 'ok', 'check');
     };
     reset.onclick = () => { c.classList.remove('show'); reset.style.display = 'none'; };
   }
 
-  /* ---- Maps — a real OpenStreetMap embed (OSM permits framing) ------------ */
-  function mapsView() {
-    const src = 'https://www.openstreetmap.org/export/embed.html?bbox=-0.16,51.49,-0.11,51.515&layer=mapnik&marker=51.5024,-0.1348';
-    return `<iframe class="maps-frame" src="${src}" referrerpolicy="no-referrer"></iframe>`;
+  /* ---- Maps — real OSM, centred on your GPS fix (A7670E GNSS) ------------- */
+  function mapsView() { return `<iframe class="maps-frame" id="mapsFrame" referrerpolicy="no-referrer"></iframe>`; }
+  async function wireMaps() {
+    const f = $('#mapsFrame'); if (!f) return;
+    let lat = 51.5024, lon = -0.1348;          // sensible default until we have a fix
+    try { const loc = await Sov.location(); if (loc && loc.fix) { lat = loc.fix.lat; lon = loc.fix.lon; } } catch (e) {}
+    const d = 0.01;
+    f.src = `https://www.openstreetmap.org/export/embed.html?bbox=${lon - d},${lat - d},${lon + d},${lat + d}&layer=mapnik&marker=${lat},${lon}`;
   }
 
   /* ---- Music — a functional in-phone player (simulated playback) ---------- */
@@ -3782,6 +3790,42 @@
     if (S.locked) renderLock();
   }
 
+  // Background cellular watch: turn new incoming SMS and calls into real
+  // notifications, even when the Phone/Messages apps aren't open. Live only, and
+  // it seeds on first read so existing messages don't all fire at once.
+  let _seenSms = null;
+  const _seenCalls = new Set();
+  function startModemWatch() {
+    setInterval(async () => {
+      if (Sov.mode !== 'live' || S.locked) return;
+      try {
+        const r = await Sov.sms.list();
+        if (r && r.present && Array.isArray(r.messages)) {
+          const ids = new Set(r.messages.map(m => m.id));
+          if (_seenSms === null) _seenSms = ids;   // seed, don't notify the backlog
+          else {
+            r.messages.filter(m => !m.sent && m.unread && !_seenSms.has(m.id)).forEach(m =>
+              Sov.notify.push({ app: 'messages', title: 'Message · ' + (m.number || ''), body: m.text || '', icon: 'msg' }));
+            _seenSms = ids;
+          }
+        }
+      } catch (e) {}
+      try {
+        const s = await Sov.phone.state();
+        const calls = (s && s.calls) || [];
+        calls.filter(c => c.direction === 'incoming' && ['ringing', 'waiting'].includes(c.state)).forEach(c => {
+          if (!_seenCalls.has(c.id)) {
+            _seenCalls.add(c.id);
+            Sov.notify.push({ app: 'phone', title: 'Incoming call', body: c.number || 'Unknown', icon: 'phone' });
+            if (S.appOpen !== 'phone') toast('Incoming call — ' + (c.number || 'Unknown'), '', 'phone');
+          }
+        });
+        const active = new Set(calls.map(c => c.id));
+        [..._seenCalls].forEach(id => { if (!active.has(id)) _seenCalls.delete(id); });
+      } catch (e) {}
+    }, 8000);
+  }
+
   async function boot() {
     bindGlobal();
     applyWallpaper();
@@ -3798,6 +3842,7 @@
     renderLock();
     renderPane(Sov.get());
     buildInsight();                      // the left privacy/status margin
+    startModemWatch();                   // incoming call/SMS → notifications (live)
     HOME_CFG = await Sov.homeConfig();   // load the layout config before first home render
     await Sov._probe();
     onUpdate(Sov.get());

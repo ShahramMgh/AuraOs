@@ -17,7 +17,7 @@
 #     the shell keeps working everywhere.
 #   - Binds to 127.0.0.1 only. Never listens on the network.
 # ============================================================================
-import json, os, re, secrets, shlex, shutil, socket, stat, subprocess, sys, glob, time
+import base64, json, os, re, secrets, shlex, shutil, socket, stat, subprocess, sys, glob, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
 
@@ -504,6 +504,24 @@ def contacts_save(lst):
     with open(tmp, "w") as f:
         json.dump(lst, f, indent=2)
     os.replace(tmp, CONTACTS_FILE)
+
+
+def photo_save(data_url):
+    """Save a captured photo (a data: URL) into ~/Pictures. The write target is
+    fixed to ~/Pictures, so there's no caller-controlled path."""
+    if not data_url or "," not in str(data_url):
+        return {"ok": False, "error": "bad image data"}
+    try:
+        raw = base64.b64decode(str(data_url).split(",", 1)[1])
+        if len(raw) > 24 * 1024 * 1024:
+            return {"ok": False, "error": "image too large"}
+        os.makedirs(PICTURES, exist_ok=True)
+        name = "AuraOS-" + time.strftime("%Y%m%d-%H%M%S") + ".jpg"
+        with open(os.path.join(PICTURES, name), "wb") as f:
+            f.write(raw)
+        return {"ok": True, "name": name}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 def contacts_op(body):
@@ -1446,6 +1464,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, MODEM.sms_send(body.get("number", ""), body.get("text", "")))
         if p == "/api/contacts":
             return self._send(200, contacts_op(body))
+        if p == "/api/photo/save":
+            return self._send(200, photo_save(body.get("data", "")))
 
         return self._send(404, {"error": "unknown endpoint"})
 

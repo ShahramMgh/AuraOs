@@ -621,6 +621,10 @@ const Sov = (() => {
       if (mode !== 'live' || !TOKEN) return null;
       return AGENT + '/api/photo?rel=' + encodeURIComponent(rel) + '&t=' + encodeURIComponent(TOKEN);
     },
+    async savePhoto(dataUrl) {   // a captured photo (data: URL) → ~/Pictures
+      if (mode === 'live') return post('/api/photo/save', { data: dataUrl }, 20000, 1);
+      return { ok: true, sim: true };
+    },
     async music() {
       if (mode === 'live') { const r = await getJSON('/api/music'); if (r) return r; }
       return { available: false, items: [], sim: true };
