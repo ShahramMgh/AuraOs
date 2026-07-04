@@ -181,21 +181,36 @@
 
   // The home layout comes from config, but the user's own choices (Personalize +
   // drag-to-reorder) override it and persist per-device.
+  // Home apps live on one or more pages (Android/iOS style). Stored as an array
+  // of arrays of app ids in PREF 'homePages'; migrated once from the old single
+  // 'homeApps' list. The focus app is the hero card, so it's filtered out of the
+  // grids, and no app appears on two pages.
+  function homePagesIds() {
+    let pages = PREF.get('homePages', null);
+    if (!Array.isArray(pages) || !pages.length) {
+      const cfg = HOME_CFG || Sov._homeCfgSync();
+      const single = PREF.get('homeApps', null) || (cfg.nodes || []).map(n => n.app);
+      pages = [Array.isArray(single) ? single : []];
+    }
+    return pages;
+  }
   function homeLayout() {
     const cfg = HOME_CFG || Sov._homeCfgSync();
     const apps = Sov.apps();
     const byId = id => apps.find(a => a.id === id);
     const focus = byId(PREF.get('focus', null) || cfg.focus) || byId('assistant') || apps[0];
-    let ids = PREF.get('homeApps', null) || (cfg.nodes || []).map(n => n.app);
-    let gridApps = ids.map(byId).filter(Boolean).filter(a => a.id !== focus.id);
-    if (!gridApps.length) gridApps = apps.filter(a => a.id !== focus.id);
-    return { cfg, focus, gridApps };
+    const seen = new Set([focus.id]);
+    let pages = homePagesIds().map(ids =>
+      (ids || []).map(byId).filter(a => a && !seen.has(a.id) && (seen.add(a.id), true)));
+    if (!pages.length) pages = [[]];
+    if (pages.every(p => !p.length)) pages[0] = apps.filter(a => a.id !== focus.id);
+    return { cfg, focus, pages };
   }
 
   function renderHome() {
     const st = Sov.get();
     HOME_CFG = HOME_CFG || Sov._homeCfgSync();
-    const { cfg, focus, gridApps } = homeLayout();
+    const { cfg, focus, pages } = homeLayout();
     // The Aura *is* the assistant's presence, so a separate "assistant" focus
     // card would be redundant — show a focus card only for another suggested app.
     const showFocus = focus.id !== 'assistant';
@@ -211,13 +226,17 @@
         </section>
         <div id="suggestSlot"></div>
         ${showFocus ? focusCardHTML(focus, cfg) : ''}
-        <div class="tile-grid" id="tileGrid">${gridApps.map(homeTile).join('')}</div>
+        <div class="home-pager" id="homePager">${pages.map((ps, pi) =>
+          `<section class="home-page"><div class="tile-grid" data-page="${pi}">${ps.map(homeTile).join('')}</div></section>`).join('')}</div>
+        ${pages.length > 1 ? `<div class="page-dots" id="pageDots">${pages.map((_, pi) =>
+          `<button class="pdot ${pi === 0 ? 'on' : ''}" data-pdot="${pi}" aria-label="Page ${pi + 1}"></button>`).join('')}</div>` : ''}
         <button class="all-apps-btn" data-nav="drawer">${ic('grid',16)} All apps</button>
         <div style="height:4px"></div>
       </div>`;
 
     bindHome();
-    enableTileSort($('#tileGrid'));
+    $$('#homePager .tile-grid').forEach(g => enableTileSort(g));
+    wireHomePager();
     mountAura();
     maybeSuggest();   // the resident may gently offer a learned routine (async)
   }
@@ -257,6 +276,17 @@
         <span class="tile-ic"><span class="tile-dot"></span>${ic(app.glyph, 24)}</span>
         <span class="tile-lbl">${esc(app.name)}</span>
       </button>`;
+  }
+
+  // Swipe between home pages; the dots track the current page and jump on tap.
+  function wireHomePager() {
+    const pager = $('#homePager'); if (!pager) return;
+    pager.onscroll = () => {
+      const pi = Math.round(pager.scrollLeft / Math.max(1, pager.clientWidth));
+      $$('#pageDots .pdot').forEach((d, i) => d.classList.toggle('on', i === pi));
+    };
+    $$('#pageDots [data-pdot]').forEach(d => d.onclick = () =>
+      pager.scrollTo({ left: (+d.dataset.pdot) * pager.clientWidth, behavior: 'smooth' }));
   }
 
   const greetShort = t => {
@@ -322,7 +352,10 @@
           tile.style.transition = 'transform .18s var(--ease)';
           tile.style.transform = '';
           setTimeout(() => { tile.style.transition = ''; }, 200);
-          PREF.set('homeApps', [...grid.querySelectorAll('.tile')].map(t => t.dataset.launch));
+          const order = [...grid.querySelectorAll('.tile')].map(t => t.dataset.launch);
+          const pi = parseInt(grid.dataset.page, 10);
+          if (!isNaN(pi)) { const pgs = homePagesIds().slice(); pgs[pi] = order; PREF.set('homePages', pgs); }
+          else PREF.set('homeApps', order);
           suppressClick = true; setTimeout(() => { suppressClick = false; }, 80);
         };
         tile.addEventListener('pointermove', move);
@@ -2470,7 +2503,8 @@
     const cfg = HOME_CFG || Sov._homeCfgSync();
     const wp = PREF.get('wallpaper', 'petrol');
     const focus = PREF.get('focus', null) || cfg.focus || 'assistant';
-    let onHome = PREF.get('homeApps', null) || (cfg.nodes || []).map(n => n.app);
+    const hPages = homePagesIds();
+    const pageOf = id => { for (let i = 0; i < hPages.length; i++) if ((hPages[i] || []).includes(id)) return i; return -1; };
 
     const swatches = WALLPAPERS.map(w =>
       `<button class="wp-sw ${w.id === wp ? 'on' : ''}" data-wp="${w.id}" style="background:${w.css}">
@@ -2481,10 +2515,14 @@
         <select class="sel" id="focusSel">${apps.map(a => `<option value="${a.id}" ${a.id === focus ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></div>`;
 
     const appRows = apps.map(a => {
-      const on = a.id === focus || onHome.includes(a.id);
+      if (a.id === focus) return `<div class="row"><span class="pa-badge" style="--tint:${a.color}">${ic(a.glyph,16)}</span>
+        <span class="rtext"><div class="rtitle">${esc(a.name)}</div><div class="rsub" style="color:var(--accent)">home focus</div></span></div>`;
+      const pi = pageOf(a.id);
+      const opts = hPages.map((_, i) => `<option value="${i}" ${pi === i ? 'selected' : ''}>Page ${i + 1}</option>`).join('')
+        + `<option value="-1" ${pi < 0 ? 'selected' : ''}>Off home</option>`;
       return `<div class="row"><span class="pa-badge" style="--tint:${a.color}">${ic(a.glyph,16)}</span>
-        <span class="rtext"><div class="rtitle">${esc(a.name)}</div>${a.id === focus ? '<div class="rsub" style="color:var(--accent)">home focus</div>' : ''}</span>
-        <button class="mini-btn ${on ? '' : 'ghost'}" data-htoggle="${a.id}" ${a.id === focus ? 'disabled' : ''}>${on ? 'On home' : 'Add'}</button></div>`;
+        <span class="rtext"><div class="rtitle">${esc(a.name)}</div></span>
+        <select class="sel" data-appage="${a.id}">${opts}</select></div>`;
     }).join('');
 
     const fx = PREF.get('fx', 'aurora');
@@ -2537,8 +2575,9 @@
             `<button class="${insSide === sd ? 'on acc' : ''}" data-insside="${sd}">${cap(sd)}</button>`).join('')}</div></div></div>
       <div class="section-head"><span class="eyebrow">Home focus</span></div>
       <div class="card">${focusRow}</div>
-      <div class="section-head"><span class="eyebrow">On the home screen</span>
-        <span class="muted" style="font-size:11px">drag tiles on home to reorder</span></div>
+      <div class="section-head"><span class="eyebrow">Home pages</span>
+        <button class="act" id="addPage">+ Add page</button></div>
+      <div class="pa-note">${hPages.length} page${hPages.length > 1 ? 's' : ''} · assign each app to a page or take it off home · swipe between pages on the home screen, drag tiles to reorder</div>
       <div class="card">${appRows}</div>
       <div style="height:8px"></div>`;
 
@@ -2567,18 +2606,23 @@
     };
     $('#focusSel').onchange = e => {
       PREF.set('focus', e.target.value);
-      // keep the new focus out of the grid list
-      let list = PREF.get('homeApps', null) || (cfg.nodes || []).map(n => n.app);
-      PREF.set('homeApps', list.filter(id => id !== e.target.value));
+      // the focus is the hero card, so pull it out of the page grids
+      const pgs = homePagesIds().map(p => (p || []).filter(id => id !== e.target.value));
+      PREF.set('homePages', pgs);
       renderPersonalize();
       toast('Home focus set', 'ok', 'check');
     };
-    $('#screenScroll').querySelectorAll('[data-htoggle]').forEach(b => b.onclick = () => {
-      let list = PREF.get('homeApps', null) || (cfg.nodes || []).map(n => n.app);
-      const id = b.dataset.htoggle;
-      list = list.includes(id) ? list.filter(x => x !== id) : [...list, id];
-      PREF.set('homeApps', list); renderPersonalize();
+    $('#screenScroll').querySelectorAll('[data-appage]').forEach(s => s.onchange = () => {
+      const id = s.dataset.appage, target = parseInt(s.value, 10);
+      let pgs = homePagesIds().map(p => (p || []).filter(x => x !== id));   // off every page
+      if (target >= 0) { while (pgs.length <= target) pgs.push([]); pgs[target].push(id); }
+      PREF.set('homePages', pgs); renderPersonalize();
     });
+    const ap = $('#addPage');
+    if (ap) ap.onclick = () => {
+      const pgs = homePagesIds().slice(); pgs.push([]); PREF.set('homePages', pgs);
+      renderPersonalize(); toast('Page added', 'ok', 'check');
+    };
   }
 
   /* ======================================================================

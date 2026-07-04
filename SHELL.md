@@ -24,6 +24,11 @@ that make this OS *aura*.
 | Familiar unlock keypad | **Network** — every connection an app makes, in the open, blockable |
 | — | **Vault** — encrypted storage status you can see and lock |
 
+Catalog apps open **inside the phone** (a real in-shell iframe browser, the
+live webcam for Camera, an OpenStreetMap embed for Maps, a working music player
+and dialer, etc.) — never a desktop app on the host — so the simulator is a
+faithful device experience.
+
 The "ask once per app" permission prompt is the heart of it: the first time an
 app wants a sensor, you decide (Allow / Only this time / Don't allow), the choice
 is remembered, and a colored dot stays on screen the entire time that sensor is
@@ -79,9 +84,10 @@ app drawer ("All apps"). The only motion is a slow background aura, which honour
 
 **Personalize** (Settings › Personalize) makes it yours, per-device and offline:
 a **wallpaper** picker (soft gradient presets), a **home focus** chooser (which
-app is the hero card), and an **app manager** (which apps sit on the home grid).
-And you can **drag tiles on the home screen to rearrange them** — a tap still
-launches, a drag reorders (smooth FLIP animation) and the order persists. These
+app is the hero card), and **home pages** — assign each app to one of several
+swipeable pages (Android/iOS style) or take it off home. On the home screen you
+**swipe between pages** (dots track your position) and **drag tiles to rearrange
+them** — a tap still launches, a drag reorders (smooth FLIP) and it all persists. These
 are stored as device-local prefs (`localStorage`); when the AI Engine proposes a
 layout in Phase II, the user's own choice wins.
 

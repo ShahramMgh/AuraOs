@@ -2174,3 +2174,14 @@ input  { font: inherit; }
 .pg-tile:active { opacity: .8; }
 .pg-view { position: absolute; inset: 0; display: none; z-index: 2; }
 .pg-view.show { display: block; }
+
+/* ── Home pages (swipeable pager) ───────────────────────────────────────── */
+.home-pager { display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
+  scroll-behavior: smooth; scrollbar-width: none; align-items: flex-start; }
+.home-pager::-webkit-scrollbar { display: none; }
+.home-page { flex: 0 0 100%; scroll-snap-align: start; }
+.page-dots { display: flex; justify-content: center; gap: 7px; padding: 12px 0 2px; }
+.pdot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); opacity: .55;
+  transition: width .2s, background .2s, opacity .2s; }
+.pdot.on { opacity: 1; background: var(--accent); width: 18px; border-radius: 3px; }
+.pa-note { font-size: 11px; color: var(--text-2); padding: 2px 4px 10px; line-height: 1.4; }
