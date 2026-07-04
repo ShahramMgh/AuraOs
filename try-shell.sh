@@ -94,7 +94,7 @@ if [[ "$MODE" == "--kiosk" ]]; then
     if command -v cog >/dev/null 2>&1; then exec cog "$1";
     elif command -v chromium >/dev/null 2>&1; then exec chromium --kiosk --ozone-platform=wayland --app="$1" --no-first-run;
     elif command -v chromium-browser >/dev/null 2>&1; then exec chromium-browser --kiosk --ozone-platform=wayland --app="$1" --no-first-run;
-    elif command -v epiphany-browser >/dev/null 2>&1; then P="${XDG_DATA_HOME:-$HOME/.local/share}/aura-epiphany"; mkdir -p "$P"; exec epiphany-browser --application-mode --profile="$P" "$1";
+    elif command -v epiphany-browser >/dev/null 2>&1; then P="${XDG_DATA_HOME:-$HOME/.local/share}/org.gnome.Epiphany.WebApp_AuraShell"; mkdir -p "$P"; epiphany-browser --application-mode --profile="$P" "$1" || exec epiphany-browser "$1";
     else echo "No web engine found. Try: sudo apt install epiphany-browser" >&2; exit 1;
     fi
   ' sh "$URL"
