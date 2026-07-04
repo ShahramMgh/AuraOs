@@ -18,7 +18,7 @@ that make this OS *aura*.
 
 | Kept, because it works | Made our own, because it protects you |
 |---|---|
-| App grid ("icon brick") + dock of favorites | **Insight margin** — a thin left-edge rail of expandable "paper-divider" tabs (Access · Resources · Network · Privacy), scoped to whatever app you're in, with per-app permission toggles one tap away |
+| App grid ("icon brick") + dock of favorites | **Insight margin** — a slim edge **handle** (left or right, your choice) that expands on a tap into "paper-divider" tabs (Access · Resources · Network · Privacy), scoped to whatever app you're in, with per-app permission toggles one tap away |
 | Pull-down quick settings, brightness/volume sliders | **Sensor guards** — kill mic, camera, or location for *every* app instantly |
 | Clock + greeting home, searchable app drawer | **Permissions** — per-app Allow / Ask / Deny, set once, changeable anytime |
 | Familiar unlock keypad | **Network** — every connection an app makes, in the open, blockable |
@@ -70,8 +70,9 @@ it** — choosing the focus and the ordering from time of day and learned routin
 (AI-MANIFEST P13, "intrinsic interface"). The home renderer only *draws* a
 config; it decides nothing on its own, reaches no sensor or model, and tapping a
 tile (or the focus card) runs the shell's normal launch + permission flow
-untouched. The Insight margin rides the left edge in every context — home *and*
-inside any app — so privacy stays visible without crowding the screen, and the
+untouched. The Insight margin sits as a small handle on your chosen edge in every
+context — home *and* inside any app — expanding only when tapped, so it never
+crowds the screen; a tap away collapses it. The
 full **A–Z icon grid is one tap away** in the
 app drawer ("All apps"). The only motion is a slow background aura, which honours
 `prefers-reduced-motion`.

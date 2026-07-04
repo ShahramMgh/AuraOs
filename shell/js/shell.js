@@ -93,7 +93,8 @@
       <button class="helm-activity" id="helmAct"><span class="actcount" id="actCount">0</span></button>
     </div>
     <div id="appframe"></div>
-    <div id="insight" class="hidden"></div>
+    <div id="insScrim"></div>
+    <div id="insight" class="side-left hidden"></div>
     <div id="promptScrim"></div>
     <div id="toast"></div>
     <div id="boot">
@@ -355,7 +356,8 @@
   ];
   const SENS2PERM = { cam: 'camera', mic: 'mic', loc: 'location' };
   const PERM2SENS = { camera: 'cam', mic: 'mic', location: 'loc' };
-  let _sysStats = null;   // cached Sov.system() reading for the Resources panel
+  let _sysStats = null;    // cached Sov.system() reading for the Resources panel
+  let _insLast = 'access'; // reopen the margin on the section you last used
 
   // The app whose frame is open right now (its data drives the margin), else null.
   function insightCtx() { return S.appOpen ? Sov.app(S.appOpen) : null; }
@@ -363,25 +365,55 @@
     const all = Sov.netlog();
     return app ? all.filter(n => n.appId === app.id) : all;
   }
+  function insightSide() { return PREF.get('insSide', 'left') === 'right' ? 'right' : 'left'; }
+  function applyInsightSide() {
+    const box = $('#insight'); if (!box) return;
+    const right = insightSide() === 'right';
+    box.classList.toggle('side-right', right);
+    box.classList.toggle('side-left', !right);
+  }
 
   function buildInsight() {
     const tabs = INS_SECTIONS.map(s =>
       `<button class="ins-tab" data-ins="${s.id}" aria-label="${s.label}">
          ${ic(s.ic, 18)}<span class="it-dot"></span><span class="it-num"></span></button>`).join('');
-    $('#insight').innerHTML =
-      `<div class="ins-rail">${tabs}</div><div class="ins-panel" id="insPanel"></div>`;
+    // Collapsed = just a small edge handle (a shortcut); tapping it expands the
+    // flyout. So nothing overlays the screen until you ask for it.
+    $('#insight').innerHTML = `
+      <button class="ins-handle" id="insHandle" aria-label="Privacy &amp; status">
+        <span class="ih-grip"></span>${ic('shieldChk', 16)}<span class="ih-dot"></span>
+      </button>
+      <div class="ins-flyout">
+        <div class="ins-rail">${tabs}</div>
+        <div class="ins-panel" id="insPanel"></div>
+      </div>`;
+    $('#insHandle').onclick = () => { S.insTab = _insLast; updateInsight(); };
     $$('#insight [data-ins]').forEach(b => b.onclick = () => {
       S.insTab = (S.insTab === b.dataset.ins) ? null : b.dataset.ins;
+      if (S.insTab) _insLast = S.insTab;
       updateInsight();
     });
+    const scrim = $('#insScrim');
+    if (scrim) scrim.onclick = () => { S.insTab = null; updateInsight(); };
+    applyInsightSide();
     updateInsight();
+  }
+
+  // Worst-of status for the collapsed handle: live sensor > warning > idle.
+  function insHandleState(app) {
+    const active = app ? Sov.activeSensorsFor(app.id).length : Object.keys(Sov.get().sensors).length;
+    if (active) return 'live';
+    return insWarnings(app).some(w => w.level !== 'ok') ? 'warn' : '';
   }
 
   function updateInsight() {
     const box = $('#insight'); if (!box) return;
     box.classList.toggle('hidden', S.locked);        // lock screen covers boot too
-    if (S.locked) { S.insTab = null; }
+    if (S.locked) S.insTab = null;
+    applyInsightSide();
     const app = insightCtx();
+    const hd = box.querySelector('.ih-dot');
+    if (hd) hd.className = 'ih-dot' + (insHandleState(app) ? ' ' + insHandleState(app) : '');
     INS_SECTIONS.forEach(s => {
       const tab = $(`#insight [data-ins="${s.id}"]`); if (!tab) return;
       tab.classList.toggle('on', S.insTab === s.id);
@@ -390,8 +422,10 @@
       dot.className = 'it-dot' + (b.dot ? ' ' + b.dot : '');
       num.textContent = b.num || '';
     });
-    box.classList.toggle('open', !!S.insTab);
-    if (S.insTab) fillInsight(S.insTab, app);
+    const open = !!S.insTab && !S.locked;
+    box.classList.toggle('open', open);
+    const scrim = $('#insScrim'); if (scrim) scrim.classList.toggle('on', open);
+    if (open) fillInsight(S.insTab, app);
   }
 
   function insBadge(sec, app) {
@@ -2421,6 +2455,7 @@
     const lvlSeg = `<div class="seg fxlvl">${FX_LEVELS.map(l =>
       `<button class="${l.id === lvl ? 'on acc' : ''}" data-fxlvl="${l.id}">${l.name}</button>`).join('')}</div>`;
 
+    const insSide = PREF.get('insSide', 'left');
     const theme = PREF.get('theme', 'teal');
     const themeChips = THEMES.map(t => `
       <button class="th-chip ${t.id === theme ? 'on' : ''}" data-th="${t.id}" style="--c:${t.accent}">
@@ -2444,6 +2479,13 @@
           <span class="rtext"><div class="rtitle">Night Light</div><div class="rsub">Warm tint across the whole screen</div></span>
           <span class="switch ${night ? 'on' : ''}"></span></button>
       </div>
+      <div class="section-head"><span class="eyebrow">Insight margin</span>
+        <span class="muted" style="font-size:11px">privacy &amp; status rail</span></div>
+      <div class="card"><div class="row"><span class="glyph">${ic('shieldChk',18)}</span>
+        <span class="rtext"><div class="rtitle">Screen side</div>
+          <div class="rsub">Which edge the margin's handle lives on</div></span>
+        <div class="seg">${['left','right'].map(sd =>
+          `<button class="${insSide === sd ? 'on acc' : ''}" data-insside="${sd}">${cap(sd)}</button>`).join('')}</div></div></div>
       <div class="section-head"><span class="eyebrow">Home focus</span></div>
       <div class="card">${focusRow}</div>
       <div class="section-head"><span class="eyebrow">On the home screen</span>
@@ -2467,6 +2509,9 @@
     if (nl) nl.onclick = () => {
       PREF.set('nightlight', !PREF.get('nightlight', false)); applyEffects(); renderPersonalize();
     };
+    $('#screenScroll').querySelectorAll('[data-insside]').forEach(b => b.onclick = () => {
+      PREF.set('insSide', b.dataset.insside); applyInsightSide(); updateInsight(); renderPersonalize();
+    });
     $('#focusSel').onchange = e => {
       PREF.set('focus', e.target.value);
       // keep the new focus out of the grid list
