@@ -18,7 +18,7 @@ that make this OS *aura*.
 
 | Kept, because it works | Made our own, because it protects you |
 |---|---|
-| App grid ("icon brick") + dock of favorites | **Live access ribbon** — a persistent, honest readout of what has your mic / camera / location / network *right now*, with one-tap "cut off" |
+| App grid ("icon brick") + dock of favorites | **Insight margin** — a thin left-edge rail of expandable "paper-divider" tabs (Access · Resources · Network · Privacy), scoped to whatever app you're in, with per-app permission toggles one tap away |
 | Pull-down quick settings, brightness/volume sliders | **Sensor guards** — kill mic, camera, or location for *every* app instantly |
 | Clock + greeting home, searchable app drawer | **Permissions** — per-app Allow / Ask / Deny, set once, changeable anytime |
 | Familiar unlock keypad | **Network** — every connection an app makes, in the open, blockable |
@@ -44,7 +44,8 @@ The Aura is where privacy becomes *felt*, not read. While private it glows a cal
 teal — *"Private · the Aura is watching over you."* The instant any app touches
 your **microphone, camera or location** — even in the background — the Aura shifts
 to that sensor's colour and pulses, the status line names what's active, and the
-live-access ribbon offers **Cut off**. The whole device reacts as one being. A
+Insight margin's **Access** tab lights and offers a one-tap toggle to cut it off.
+The whole device reacts as one being. A
 backgrounded app keeps holding its sensors (that's when the indicator matters
 most); they release only when the app is closed, cut off, or its permission
 revoked. The loop pauses whenever home isn't on screen and honours
@@ -69,8 +70,9 @@ it** — choosing the focus and the ordering from time of day and learned routin
 (AI-MANIFEST P13, "intrinsic interface"). The home renderer only *draws* a
 config; it decides nothing on its own, reaches no sensor or model, and tapping a
 tile (or the focus card) runs the shell's normal launch + permission flow
-untouched. The live-access ribbon stays pinned at the foot, so privacy remains
-visible on the home screen, and the full **A–Z icon grid is one tap away** in the
+untouched. The Insight margin rides the left edge in every context — home *and*
+inside any app — so privacy stays visible without crowding the screen, and the
+full **A–Z icon grid is one tap away** in the
 app drawer ("All apps"). The only motion is a slow background aura, which honours
 `prefers-reduced-motion`.
 
@@ -284,8 +286,8 @@ and the loop is verified in sim + a local live run, not yet on hardware.
 - Launching external GUI apps runs them via the agent; a system service doesn't
   share the session's Wayland/D-Bus, so GUI launch is best-effort until the shell
   does its own window management (CLI/daemon apps like Syncthing launch fine).
-- The live sensor ribbon is driven by the shell's own launch flow today; wiring
-  it to `xdg-desktop-portal` so it reflects *any* process's sensor access
+- The Insight margin's Access tab is driven by the shell's own launch flow today;
+  wiring it to `xdg-desktop-portal` so it reflects *any* process's sensor access
   (roadmap item 4 in `ARCHITECTURE.md`) is the next step to make it airtight.
 - PIN unlock is delegated to the greeter/PAM in production; the agent endpoint is
   a placeholder that should be wired to real auth before shipping.

@@ -15,6 +15,7 @@
     locked: true,
     pin: '',
     ctlTab: 'controls',   // which pull-down panel is showing: 'notifs' | 'controls'
+    insTab: null,         // which insight-margin section is expanded (or null)
   };
 
   /* ======================================================================
@@ -92,6 +93,7 @@
       <button class="helm-activity" id="helmAct"><span class="actcount" id="actCount">0</span></button>
     </div>
     <div id="appframe"></div>
+    <div id="insight" class="hidden"></div>
     <div id="promptScrim"></div>
     <div id="toast"></div>
     <div id="boot">
@@ -211,8 +213,7 @@
         <div class="tile-grid" id="tileGrid">${gridApps.map(homeTile).join('')}</div>
         <button class="all-apps-btn" data-nav="drawer">${ic('grid',16)} All apps</button>
         <div style="height:4px"></div>
-      </div>
-      <div class="home2-foot" id="homeFoot">${homeRibbonHTML()}</div>`;
+      </div>`;
 
     bindHome();
     enableTileSort($('#tileGrid'));
@@ -329,38 +330,226 @@
     });
   }
 
-  // Compact, always-honest live-access readout — the privacy core, kept on the
-  // home screen. Shows what has a sensor/network right now, with one-tap cut-off.
-  function homeRibbonHTML() {
-    const st = Sov.get();
-    const running = Sov.running();
-    const items = running.map(r => {
-      const app = Sov.app(r.appId);
-      const sens = Sov.activeSensorsFor(r.appId);
-      return { app, uses: sens.map(k => ({ mic: 'mic', cam: 'cam', loc: 'loc' }[k])), net: app.net, active: sens.length > 0 };
-    }).filter(x => x.active || x.net);
-    const on = Object.keys(st.sensors).length > 0;
+  /* ======================================================================
+     INSIGHT MARGIN — the left-edge privacy/status rail.
+     Four thin "paper-divider" tabs (Access · Resources · Network · Privacy)
+     that expand into a translucent, blurred panel. Everything is scoped to the
+     CURRENT context: the app you're in if one is open, otherwise the device as
+     a whole — so opening the Browser shows the Browser's access, connections,
+     resources and risk. Permissions toggle right here with a tap; no trip to
+     Settings. It replaces the old always-on bottom "live access" ribbon.
+     ====================================================================== */
+  const INS_SECTIONS = [
+    { id: 'access', ic: 'shieldChk', label: 'Access' },
+    { id: 'res',    ic: 'cpu',       label: 'Resources' },
+    { id: 'net',    ic: 'globe',     label: 'Network' },
+    { id: 'sec',    ic: 'eye',       label: 'Privacy' },
+  ];
+  const INS_CAPS = [
+    { key: 'camera',   sensor: 'cam', ic: 'cam',      label: 'Camera' },
+    { key: 'mic',      sensor: 'mic', ic: 'mic',      label: 'Microphone' },
+    { key: 'location', sensor: 'loc', ic: 'loc',      label: 'Location' },
+    { key: 'contacts',              ic: 'contacts', label: 'Contacts' },
+    { key: 'files',                 ic: 'files',    label: 'Files' },
+    { key: 'network',               ic: 'globe',    label: 'Network' },
+  ];
+  const SENS2PERM = { cam: 'camera', mic: 'mic', loc: 'location' };
+  const PERM2SENS = { camera: 'cam', mic: 'mic', location: 'loc' };
+  let _sysStats = null;   // cached Sov.system() reading for the Resources panel
 
-    let body;
-    if (!items.length) {
-      body = `<div class="lr-quiet"><span class="lr-shield">${ic('shieldChk',14)}</span>
-        Nothing is using your mic, camera, location or network.</div>`;
-    } else {
-      body = items.map(x => {
-        const tags = [
-          ...x.uses.map(u => `<span class="li-tag ${u}"><span class="dot"></span>${({ mic: 'Mic', cam: 'Camera', loc: 'Location' }[u])}</span>`),
-          x.net ? `<span class="li-tag net"><span class="dot"></span>Network</span>` : ''
-        ].filter(Boolean).join('');
-        const cut = x.uses.length ? `<button class="li-cut" data-cut="${x.app.id}">Cut off</button>` : '';
-        return `<div class="lr-item">
-          <span class="li-badge" style="--tint:${x.app.color}">${ic(x.app.glyph,14)}</span>
-          <span class="lr-main"><span class="lr-app">${esc(x.app.name)}</span>
-            <span class="li-what">${tags}</span></span>${cut}</div>`;
-      }).join('');
+  // The app whose frame is open right now (its data drives the margin), else null.
+  function insightCtx() { return S.appOpen ? Sov.app(S.appOpen) : null; }
+  function insNetlog(app) {
+    const all = Sov.netlog();
+    return app ? all.filter(n => n.appId === app.id) : all;
+  }
+
+  function buildInsight() {
+    const tabs = INS_SECTIONS.map(s =>
+      `<button class="ins-tab" data-ins="${s.id}" aria-label="${s.label}">
+         ${ic(s.ic, 18)}<span class="it-dot"></span><span class="it-num"></span></button>`).join('');
+    $('#insight').innerHTML =
+      `<div class="ins-rail">${tabs}</div><div class="ins-panel" id="insPanel"></div>`;
+    $$('#insight [data-ins]').forEach(b => b.onclick = () => {
+      S.insTab = (S.insTab === b.dataset.ins) ? null : b.dataset.ins;
+      updateInsight();
+    });
+    updateInsight();
+  }
+
+  function updateInsight() {
+    const box = $('#insight'); if (!box) return;
+    box.classList.toggle('hidden', S.locked);        // lock screen covers boot too
+    if (S.locked) { S.insTab = null; }
+    const app = insightCtx();
+    INS_SECTIONS.forEach(s => {
+      const tab = $(`#insight [data-ins="${s.id}"]`); if (!tab) return;
+      tab.classList.toggle('on', S.insTab === s.id);
+      const dot = tab.querySelector('.it-dot'), num = tab.querySelector('.it-num');
+      const b = insBadge(s.id, app);
+      dot.className = 'it-dot' + (b.dot ? ' ' + b.dot : '');
+      num.textContent = b.num || '';
+    });
+    box.classList.toggle('open', !!S.insTab);
+    if (S.insTab) fillInsight(S.insTab, app);
+  }
+
+  function insBadge(sec, app) {
+    if (sec === 'access') {
+      const n = app ? Sov.activeSensorsFor(app.id).length : Object.keys(Sov.get().sensors).length;
+      return { dot: n ? 'live' : '' };
     }
-    return `<div class="live-ribbon ${on ? 'on' : ''}" id="homeRibbon">
-      <div class="lr-head"><span class="pulse"></span>Live access${on ? ' — active now' : ''}</div>
-      <div class="lr-body">${body}</div></div>`;
+    if (sec === 'net') { const l = insNetlog(app); return { num: l.length || '' }; }
+    if (sec === 'sec')  { return { dot: insWarnings(app).some(w => w.level !== 'ok') ? 'warn' : '' }; }
+    if (sec === 'res')  {
+      const c = _sysStats ? Math.min(100, Math.round(_sysStats.load[0] / (_sysStats.cores || 1) * 100)) : 0;
+      return { dot: c >= 85 ? 'warn' : '' };
+    }
+    return {};
+  }
+
+  function fillInsight(sec, app) {
+    const panel = $('#insPanel'); if (!panel) return;
+    const meta = INS_SECTIONS.find(x => x.id === sec);
+    const ctx = app ? esc(app.name) : 'This device';
+    let body = '';
+    if (sec === 'access') body = insAccessBody(app);
+    else if (sec === 'res') { body = insResBody(app); refreshSys(); }
+    else if (sec === 'net') body = insNetBody(app);
+    else if (sec === 'sec') body = insSecBody(app);
+    panel.innerHTML =
+      `<div class="ip-head">${ic(meta.ic, 15)}<span class="ip-title">${meta.label}</span>
+         <span class="ip-ctx">${ctx}</span></div><div class="ip-body">${body}</div>`;
+    wireInsight(sec, app);
+  }
+
+  // ---- Access: per-app permission toggles (or the device-wide live readout) --
+  function insAccessBody(app) {
+    if (!app) {
+      const using = Sov.running().map(r => ({ app: Sov.app(r.appId), sens: Sov.activeSensorsFor(r.appId) }))
+        .filter(x => x.app && (x.sens.length || x.app.net));
+      const rows = using.length ? using.map(x => `
+        <div class="ins-perm">
+          <span class="pm-ic" style="color:${x.app.color}">${ic(x.app.glyph, 16)}</span>
+          <span class="pm-lbl">${esc(x.app.name)}</span>
+          ${x.sens.map(s => `<span class="li-tag ${s}"><span class="dot"></span>${({ mic: 'Mic', cam: 'Cam', loc: 'Loc' }[s])}</span>`).join('')}
+          ${x.app.net ? '<span class="li-tag net"><span class="dot"></span>Net</span>' : ''}
+        </div>`).join('')
+        : `<div class="ins-warn ok"><span class="wn-ic">${ic('shieldChk', 16)}</span><span>Nothing is using your mic, camera, location or network.</span></div>`;
+      return `<div class="ins-sec-lead">What has access right now. Open an app to manage its permissions here.</div>${rows}`;
+    }
+    const perms = Sov.perms(app.id);
+    const active = new Set(Sov.activeSensorsFor(app.id));
+    const declares = new Set([...(app.uses || []).map(s => SENS2PERM[s]), ...(app.perms || []), ...(app.net ? ['network'] : [])]);
+    const rows = INS_CAPS.map(c => ({ c, on: (perms[c.key] || 'ask') === 'allow',
+        live: c.sensor && active.has(c.sensor), rel: declares.has(c.key) }))
+      .sort((a, b) => (b.rel ? 1 : 0) - (a.rel ? 1 : 0))
+      .map(r => `
+        <div class="ins-perm" data-perm="${r.c.key}">
+          <span class="pm-ic">${ic(r.c.ic, 16)}</span>
+          <span class="pm-lbl">${r.c.label}${r.rel ? '' : ' <span class="wn-sub">· not requested</span>'}</span>
+          ${r.live ? '<span class="pm-live"></span>' : ''}
+          <span class="ins-tgl ${r.on ? 'on' : ''}"></span>
+        </div>`).join('');
+    return `<div class="ins-sec-lead">Tap a switch to allow or block ${esc(app.name)}. A live dot means it's in use now; blocking cuts it off immediately.</div>${rows}`;
+  }
+
+  // ---- Resources: how hard the device is working (system-wide, honestly) -----
+  function insResBody(app) {
+    const s = _sysStats;
+    if (!s) return `<div class="ins-sec-lead">Reading system resources…</div>`;
+    const cpu = Math.min(100, Math.round(s.load[0] / (s.cores || 1) * 100));
+    const memPct = Math.round(s.mem.used / s.mem.total * 100);
+    const swapPct = s.swap && s.swap.total ? Math.round(s.swap.used / s.swap.total * 100) : 0;
+    const up = (sec => { const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60);
+      return h >= 24 ? Math.floor(h / 24) + 'd ' + (h % 24) + 'h' : h + 'h ' + m + 'm'; })(s.uptime || 0);
+    const cls = p => p >= 90 ? 'crit' : p >= 75 ? 'warn' : '';
+    const stat = (lbl, val, pct) => `
+      <div class="ins-stat"><div class="st-top"><span>${lbl}</span><b>${val}</b></div>
+        <div class="ins-bar ${cls(pct)}"><span style="width:${Math.max(2, pct)}%"></span></div></div>`;
+    const lead = app
+      ? `System-wide load while <b>${esc(app.name)}</b> is open. Per-app metering arrives with the on-device sandbox.`
+      : `How hard your device is working right now.`;
+    return `<div class="ins-sec-lead">${lead}</div>
+      ${stat('CPU', cpu + '%', cpu)}
+      ${stat('Memory', (s.mem.used / 1024).toFixed(1) + ' / ' + (s.mem.total / 1024).toFixed(0) + ' GB', memPct)}
+      ${s.swap && s.swap.total ? stat('Swap', swapPct + '%', swapPct) : ''}
+      <div class="ins-net"><span class="nt-host" style="font-family:inherit">Uptime</span><span class="nt-ct">${up}</span></div>`;
+  }
+  async function refreshSys() {
+    try { _sysStats = await Sov.system(); } catch (e) { return; }
+    if (S.insTab === 'res') { const b = $('#insPanel .ip-body'); if (b) b.innerHTML = insResBody(insightCtx()); }
+  }
+
+  // ---- Network: the connection log, scoped to the app, one-tap block ---------
+  function insNetBody(app) {
+    const all = Sov.netlog();
+    const log = app ? all.filter(n => n.appId === app.id) : all;
+    if (!log.length) return `<div class="ins-warn ok"><span class="wn-ic">${ic('shieldChk', 16)}</span><span>${app ? esc(app.name) + ' has made no connections.' : 'No network activity logged.'}</span></div>`;
+    const rows = log.map(n => {
+      const idx = all.indexOf(n), ap = Sov.app(n.appId);
+      return `<div class="ins-net ${n.blocked ? 'blocked' : ''}" data-nethost="${idx}">
+        <span class="nt-host">${esc(n.host)}</span>
+        <span class="nt-ct">${app ? '' : (ap ? esc(ap.name) + ' · ' : '')}${n.count}×${n.when ? ' · ' + esc(n.when) : ''}</span>
+        <button class="nt-block">${n.blocked ? 'Blocked' : 'Block'}</button></div>`;
+    }).join('');
+    return `<div class="ins-sec-lead">${app ? 'Where ' + esc(app.name) + ' connects' : 'Every connection your apps make'} — tap to block a host.</div>${rows}`;
+  }
+
+  // ---- Privacy: a plain-language risk read, scoped to the app or the device --
+  function insSecBody(app) {
+    return `<div class="ins-sec-lead">${app ? 'Privacy &amp; security for ' + esc(app.name) : 'Your device at a glance'}.</div>` +
+      insWarnings(app).map(w => `<div class="ins-warn ${w.level}"><span class="wn-ic">${ic(w.ic, 16)}</span>
+        <span>${w.text}${w.sub ? `<div class="wn-sub">${w.sub}</div>` : ''}</span></div>`).join('');
+  }
+  function insWarnings(app) {
+    const st = Sov.get(), out = [];
+    if (app) {
+      const perms = Sov.perms(app.id), active = Sov.activeSensorsFor(app.id);
+      if (active.length) out.push({ level: 'warn', ic: 'eye', text: `Using ${active.map(s => ({ mic: 'microphone', cam: 'camera', loc: 'location' }[s])).join(', ')} right now.` });
+      const granted = ['camera', 'mic', 'location'].filter(k => (perms[k] || 'ask') === 'allow');
+      if (granted.length) out.push({ level: 'warn', ic: 'shield', text: `Standing access to ${granted.map(k => ({ camera: 'camera', mic: 'microphone', location: 'location' }[k])).join(', ')}.`, sub: 'Toggle it off under Access.' });
+      const blk = insNetlog(app).filter(n => n.blocked);
+      if (blk.length) out.push({ level: 'alert', ic: 'globe', text: `${blk.length} connection${blk.length > 1 ? 's' : ''} blocked.`, sub: blk.map(b => b.host).join(', ') });
+      if (!out.length) out.push({ level: 'ok', ic: 'shieldChk', text: `${esc(app.name)} isn't using any sensor, and nothing's flagged.` });
+      return out;
+    }
+    const sensors = Object.keys(st.sensors);
+    if (sensors.length) out.push({ level: 'warn', ic: 'eye', text: `${sensors.map(s => ({ mic: 'Microphone', cam: 'Camera', loc: 'Location' }[s])).join(', ')} in use now.` });
+    const grants = Object.values(Sov.allPerms()).filter(p => ['camera', 'mic', 'location'].some(k => (p[k] || 'ask') === 'allow')).length;
+    if (grants) out.push({ level: 'warn', ic: 'shield', text: `${grants} app${grants > 1 ? 's' : ''} can use a sensor.`, sub: 'Review under Permissions.' });
+    const blk = Sov.netlog().filter(n => n.blocked);
+    if (blk.length) out.push({ level: 'alert', ic: 'globe', text: `${blk.length} host${blk.length > 1 ? 's' : ''} blocked.`, sub: blk.map(b => b.host).join(', ') });
+    out.push({ level: st.vault.unlocked ? 'warn' : 'ok', ic: 'lock', text: `Vault ${st.vault.unlocked ? 'unlocked' : 'locked'}.`, sub: st.disk.encrypted ? 'Disk encrypted · ' + esc(st.disk.algo || 'LUKS2') : '' });
+    if (st.net.vpn) out.push({ level: 'ok', ic: 'shieldChk', text: 'VPN active — traffic is tunneled.' });
+    return out;
+  }
+
+  function wireInsight(sec, app) {
+    const panel = $('#insPanel'); if (!panel) return;
+    if (sec === 'access' && app) {
+      panel.querySelectorAll('[data-perm]').forEach(row => {
+        row.querySelector('.ins-tgl').onclick = () => {
+          const key = row.dataset.perm, next = (Sov.perms(app.id)[key] || 'ask') === 'allow' ? 'deny' : 'allow';
+          Sov.setPerm(app.id, key, next);
+          const sensor = PERM2SENS[key];
+          if (sensor && next === 'deny') Sov.releaseSensor(sensor, app.id);
+          if (sensor && next === 'allow' && (app.uses || []).includes(sensor)) Sov.acquireSensor(sensor, app.id);
+          toast(`${cap(esc(app.name))} ${next === 'allow' ? 'can use' : 'can no longer use'} ${INS_CAPS.find(c => c.key === key).label.toLowerCase()}`,
+                next === 'allow' ? 'ok' : 'warn', next === 'allow' ? 'check' : 'shield');
+          fillInsight('access', app); updateInsight();
+        };
+      });
+    }
+    if (sec === 'net') {
+      panel.querySelectorAll('[data-nethost]').forEach(row => {
+        row.querySelector('.nt-block').onclick = () => {
+          Sov.blockHost(parseInt(row.dataset.nethost, 10));
+          toast('Host blocked', 'warn', 'globe');
+          fillInsight('net', app); updateInsight();
+        };
+      });
+    }
   }
 
   function bindHome() {
@@ -2737,6 +2926,7 @@
     $('#appframe').classList.add('open');
     if (typeof Aura !== 'undefined') Aura.stop();   // home is covered
     updateHelm();
+    updateInsight();   // margin now reflects THIS app's access, net, resources
   }
   function closeAppFrame(silent) {
     // Backgrounding an app does NOT release its sensors — a running app can keep
@@ -2747,6 +2937,7 @@
     S.appOpen = null;
     if (!silent && S.view === 'home') renderHome();
     updateHelm();
+    updateInsight();   // back to device-wide context
   }
 
   /* ======================================================================
@@ -2811,6 +3002,7 @@
     S.locked = false;
     $('#lock').classList.add('hidden');
     goHome();
+    updateInsight();   // reveal the margin once we're past the lock screen
   }
 
   /* ======================================================================
@@ -2837,7 +3029,6 @@
     // refresh the honest surfaces if visible — patch in place, don't rebuild
     if (!S.locked && S.view === 'home' && !S.appOpen) {
       const clk = $('#homeClock'); if (clk) clk.textContent = st.time;
-      const rib = $('#homeRibbon'); if (rib) rib.outerHTML = homeRibbonHTML();
       const as = $('#auraStatus'); if (as) as.innerHTML = auraStatusHTML();
       if (typeof Aura !== 'undefined') Aura.setSensors(activeSensorKinds());
       bindHome();
@@ -2846,6 +3037,7 @@
     }
     if (S.controlOpen) { /* toggles reflect state on next open; live sliders ok */ }
     if (S.locked) renderLock();
+    updateInsight();   // the left margin refreshes in every context (home + apps)
     $('#agentBadge').classList.toggle('live', st.mode === 'live');
     $('#agentBadge').textContent = st.mode === 'live' ? 'LIVE' : 'SIM';
   }
@@ -2968,6 +3160,7 @@
     });
     renderLock();
     renderPane(Sov.get());
+    buildInsight();                      // the left privacy/status margin
     HOME_CFG = await Sov.homeConfig();   // load the layout config before first home render
     await Sov._probe();
     onUpdate(Sov.get());

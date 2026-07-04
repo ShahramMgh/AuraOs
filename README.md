@@ -40,7 +40,7 @@ The line we hold, concretely:
 
 - **The Aura Shell** — a complete mobile UI: lock screen, home with a live
   clock and app grid, app drawer, pull-down Control Center, and a persistent
-  **live-access ribbon** showing exactly what has your mic / camera / location /
+  **insight margin** — a left-edge rail showing exactly what has your mic / camera / location /
   network *right now*, with one-tap cut-off.
 - **Privacy surfaces** — per-app **Permissions** (Allow / Ask / Deny), a
   **Network** log of every connection an app makes (blockable), **sensor guards**

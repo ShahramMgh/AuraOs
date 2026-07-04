@@ -152,7 +152,7 @@ principle becomes real in *this* codebase.
 | **9 · Reversible automation** | Every permission and toggle is instantly revocable. | Every automated action carries an **undo token** and lands in a replayable audit trail. |
 | **10 · Approval levels** | Sensor guards / permission postures are user-set, not app-set. | A global + per-domain **trust level (0–3)**, defaulting to Recommend. |
 | **11 · AI memory** | The **Vault** is fscrypt-encrypted, local, inspectable. | AI memory *lives in the Vault* with a **Memory** screen to search/edit/delete every entry. |
-| **12 · Context, not surveillance** | The **live access ribbon** shows what has mic/cam/location *right now*. | AI context sources are independently authorized; when AI is actively reading a source, the **same live indicator lights up**. |
+| **12 · Context, not surveillance** | The **insight margin** shows what has mic/cam/location *right now*. | AI context sources are independently authorized; when AI is actively reading a source, the **same live indicator lights up**. |
 | **13 · Intrinsic interface** | The shell is task-first, not a glossy app maze. | Intent-driven orchestration layers on top — apps become the Engine's tools. |
 
 ### Non-negotiable defaults
