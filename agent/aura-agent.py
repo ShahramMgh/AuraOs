@@ -1326,6 +1326,9 @@ class Handler(BaseHTTPRequestHandler):
 
 class Server(ThreadingHTTPServer):
     daemon_threads = True
+    # Rebind promptly after a restart instead of failing with "Address already
+    # in use" during the kernel's TIME_WAIT window on the listening socket.
+    allow_reuse_address = True
 
     def handle_error(self, request, client_address):
         # A dropped client connection is expected (polling, page reloads); don't

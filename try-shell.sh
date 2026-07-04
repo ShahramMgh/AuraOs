@@ -52,6 +52,18 @@ export AURA_STATE_DIR="${AURA_STATE_DIR:-$HOME/.local/share/aura}"
 
 command -v python3 >/dev/null || { echo "python3 is required"; exit 1; }
 
+# A previous run may have left an agent holding the port (a --kiosk session used
+# to `exec cage`, which skipped the cleanup trap and orphaned the agent). Reclaim
+# the port so we always start clean instead of crashing with "Address in use".
+if command -v fuser >/dev/null 2>&1; then
+  fuser -k "${PORT}/tcp" >/dev/null 2>&1 || true
+elif command -v lsof >/dev/null 2>&1; then
+  lsof -ti "tcp:${PORT}" 2>/dev/null | xargs -r kill >/dev/null 2>&1 || true
+else
+  pkill -f "agent/aura-agent.py" >/dev/null 2>&1 || true
+fi
+sleep 0.3
+
 echo "Starting Aura system-bridge agent…"
 python3 "$DIR/agent/aura-agent.py" &
 AGENT=$!
@@ -88,13 +100,17 @@ if [[ "$MODE" == "--kiosk" ]]; then
   fi
   echo "Launching cage kiosk session…  (switch VT or kill to exit)"
   export WLR_LIBINPUT_NO_DEVICES=1
-  # Same engine preference as the device launcher: chromeless cog/chromium first,
-  # WebKitGTK (epiphany) as the Ubuntu 24.04+ fallback.
-  exec cage -s -- sh -c '
+  # Engine preference: truly chromeless kiosk engines first (cog/chromium), then
+  # WebKitGTK's epiphany. NB: epiphany's --application-mode is broken on GNOME
+  # Web 46+ (it wants a web-app .desktop file and crashes without it, see
+  # epiphany#713), so we run it plain — cage still makes it a single fullscreen
+  # surface. Install chromium for a header-bar-free kiosk. NOT `exec`, so when
+  # cage exits the cleanup trap runs and the agent is stopped (no orphan).
+  cage -s -- sh -c '
     if command -v cog >/dev/null 2>&1; then exec cog "$1";
     elif command -v chromium >/dev/null 2>&1; then exec chromium --kiosk --ozone-platform=wayland --app="$1" --no-first-run;
     elif command -v chromium-browser >/dev/null 2>&1; then exec chromium-browser --kiosk --ozone-platform=wayland --app="$1" --no-first-run;
-    elif command -v epiphany-browser >/dev/null 2>&1; then P="${XDG_DATA_HOME:-$HOME/.local/share}/org.gnome.Epiphany.WebApp_AuraShell"; mkdir -p "$P"; epiphany-browser --application-mode --profile="$P" "$1" || exec epiphany-browser "$1";
+    elif command -v epiphany-browser >/dev/null 2>&1; then exec epiphany-browser "$1";
     else echo "No web engine found. Try: sudo apt install epiphany-browser" >&2; exit 1;
     fi
   ' sh "$URL"
