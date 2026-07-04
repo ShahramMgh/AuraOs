@@ -168,6 +168,9 @@
       <span class="pane-spacer"></span>
       ${sensorHTML}
       ${notifHTML}
+      ${_cellStatus && _cellStatus.present
+        ? `<span class="pane-cell${_cellStatus.dataConnected ? ' on' : ''}" title="${esc(_cellStatus.operator || 'Cellular')}">${ic('cell',12)}${_cellStatus.tech ? `<span class="pane-tech">${esc(String(_cellStatus.tech).toUpperCase())}</span>` : ''}</span>`
+        : ''}
       <span class="pane-net">${net}</span>
       ${st.net.bluetooth ? `<span class="pane-net">${ic('bt',13)}</span>` : ''}
       <span class="pane-batt ${bcls}">
@@ -835,8 +838,9 @@
   // Spotlight index — the drawer search spans more than app names: it reaches
   // settings pages and quick actions, so one field is a launcher for the whole
   // OS. Each entry runs through the shell's normal nav/launch/action paths.
+  let _spotContacts = null;   // contacts folded into spotlight (loaded once, async)
   function spotlightIndex() {
-    return [
+    return [...(_spotContacts || []),
       { label: 'Wi-Fi', sub: 'Networks & connection', icon: 'wifi', kw: 'internet wireless connect network', run: () => go('sys-wifi') },
       { label: 'Bluetooth', sub: 'Devices & radio', icon: 'bt', kw: 'pair headphones', run: () => go('sys-bluetooth') },
       { label: 'Display', sub: 'Brightness', icon: 'sun', kw: 'brightness screen light', run: () => go('sys-display') },
@@ -874,6 +878,16 @@
       const caps = await Sov.capabilities();
       INSTALLED = (caps && caps.apps) || [];
       if (S.view !== 'drawer') return;   // navigated away while loading
+    }
+    if (_spotContacts === null) {   // fold contacts into search — call from a search
+      _spotContacts = [];
+      try {
+        _spotContacts = (await Sov.contacts.list()).map(c => ({
+          label: c.name || c.number || 'Contact', sub: 'Contact · ' + (c.number || ''), icon: 'contacts',
+          kw: ((c.number || '') + ' call message contact ' + (c.name || '')).toLowerCase(),
+          run: () => { Sov.phone.dial(c.number); toast('Calling ' + (c.name || c.number) + '…', '', 'phone'); },
+        }));
+      } catch (e) {}
     }
     const q = filter.trim().toLowerCase();
     const apps = Sov.apps().filter(a => !q || a.name.toLowerCase().includes(q));
@@ -1062,6 +1076,7 @@
       </div>
       <div class="toggle-grid">
         ${tgl('wifi', t.wifi && !t.airplane, 'wifi', 'wifiOff', 'Wi-Fi', esc(t.ssid || 'on'), 'off')}
+        ${_cellStatus && _cellStatus.present ? tgl('wwan', !!_cellStatus.dataConnected, 'cell', 'cell', 'Mobile data', esc(_cellStatus.tech ? String(_cellStatus.tech).toUpperCase() : 'on'), 'off') : ''}
         ${tgl('bluetooth', t.bluetooth, 'bt', 'bt', 'Bluetooth', 'on', 'off')}
         ${tgl('airplane', t.airplane, 'plane', 'plane', 'Airplane', 'on', 'off')}
         ${tgl('vpn', t.vpn, 'shieldChk', 'shield', 'VPN', 'connected', 'off')}
@@ -1114,6 +1129,14 @@
         PREF.set('nightlight', now);
         applyEffects();
         toast(now ? 'Night Light on — warm tint' : 'Night Light off', 'ok', 'sun');
+        renderControl();
+        return;
+      }
+      if (k === 'wwan') {
+        const cur = !!(_cellStatus && _cellStatus.dataConnected);
+        Sov.setToggle('wwan', !cur);
+        if (_cellStatus) _cellStatus.dataConnected = !cur;   // optimistic; the watch reconciles
+        toast('Mobile data ' + (!cur ? 'on' : 'off'), 'ok', 'cell');
         renderControl();
         return;
       }
@@ -3793,10 +3816,13 @@
   // Background cellular watch: turn new incoming SMS and calls into real
   // notifications, even when the Phone/Messages apps aren't open. Live only, and
   // it seeds on first read so existing messages don't all fire at once.
-  let _seenSms = null;
+  let _seenSms = null, _cellStatus = null;
   const _seenCalls = new Set();
-  function startModemWatch() {
+  async function startModemWatch() {
+    const pull = async () => { try { _cellStatus = await Sov.phone.status(); } catch (e) {} };
+    await pull();
     setInterval(async () => {
+      await pull();                       // keep the status-bar cellular chip fresh
       if (Sov.mode !== 'live' || S.locked) return;
       try {
         const r = await Sov.sms.list();

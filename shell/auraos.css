@@ -2279,3 +2279,8 @@ input  { font: inherit; }
 .tile-ic { position: relative; }
 .tile-img { position: absolute; inset: 0; margin: auto; width: 30px; height: 30px;
   border-radius: 8px; object-fit: cover; }
+
+/* Cellular chip in the status bar */
+.pane-cell { display: inline-flex; align-items: center; gap: 3px; color: var(--text-2); }
+.pane-cell.on { color: var(--text-1); }
+.pane-tech { font-size: 8.5px; font-family: var(--mono); letter-spacing: .03em; }

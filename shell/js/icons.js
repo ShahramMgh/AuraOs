@@ -20,6 +20,7 @@ const ICON = (() => {
     cam:        `<rect x="3" y="7" width="13" height="11" rx="2"/><path d="M16 11l5-3v9l-5-3z"/>`,
     loc:        `<path d="M12 21c4-5 6-8.2 6-11a6 6 0 1 0-12 0c0 2.8 2 6 6 11z"/><circle cx="12" cy="10" r="2.2"/>`,
     wifi:       `<path d="M2 8.5a15 15 0 0 1 20 0M5 12a10 10 0 0 1 14 0M8 15.5a5 5 0 0 1 8 0"/><circle cx="12" cy="19" r="1"/>`,
+    cell:       `<path d="M4 20v-3M9.3 20v-6M14.6 20v-9M19.9 20v-12"/>`,
     wifiOff:    `<path d="M2 8.5a15 15 0 0 1 8-3.9M14 4.9A15 15 0 0 1 22 8.5M8 15.5a5 5 0 0 1 6-.9"/><circle cx="12" cy="19" r="1"/><path d="M3 3l18 18"/>`,
     bt:         `<path d="M8 7l8 5-4 3V5l4 3-8 5"/>`,
     plane:      `<path d="M12 3c1 0 1.5 1 1.5 3v3l6 3.5v2l-6-2v3.5l2 1.5v1.5L12 21l-3-1.5V18l2-1.5V13l-6 2v-2L11 9V6c0-2 .5-3 1-3z"/>`,
