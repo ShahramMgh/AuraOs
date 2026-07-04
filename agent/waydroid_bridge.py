@@ -31,6 +31,7 @@ import shutil
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 
 # How long an idle Android session may live before we reclaim its memory.
@@ -57,43 +58,52 @@ AUTO_STORE = os.environ.get("AURA_ANDROID_FDROID", "1") not in ("0", "false", "n
 FDROID_REPO = "https://f-droid.org/repo"
 FDROID_PKG_API = "https://f-droid.org/api/v1/packages/"
 
-# (package, name, one-line summary, category) — all real, free/libre F-Droid apps.
+# (package, name, one-line summary, category). Every entry is VERIFIED to resolve
+# on F-Droid (checked against F-Droid's package API) so the store never offers an
+# app that can't install. For everything beyond this curated set, the "Stores"
+# category installs F-Droid and Aurora Store — full catalogues in their own right.
 FDROID_CATALOG = [
+    # Full app stores — the escape hatch to the entire catalogue.
+    ("org.fdroid.fdroid", "F-Droid", "The full free/libre app store", "Stores"),
+    ("com.aurora.store", "Aurora Store", "Play Store apps, no account", "Stores"),
+    # Internet
     ("org.mozilla.fennec_fdroid", "Firefox", "Private, open web browser", "Internet"),
-    ("org.torproject.android", "Orbot", "Tor for Android — route apps over Tor", "Internet"),
-    ("com.wireguard.android", "WireGuard", "Fast, modern, secure VPN", "Internet"),
     ("com.nextcloud.client", "Nextcloud", "Your own private cloud", "Internet"),
     ("im.vector.app", "Element", "Secure Matrix chat & calls", "Internet"),
     ("com.keylesspalace.tusky", "Tusky", "A Mastodon client", "Internet"),
     ("de.danoeh.antennapod", "AntennaPod", "Podcast manager & player", "Internet"),
     ("com.nononsenseapps.feeder", "Feeder", "Lightweight RSS reader", "Internet"),
     ("com.fsck.k9", "K-9 Mail", "Advanced email client", "Internet"),
+    ("eu.faircode.email", "FairEmail", "Privacy-focused email", "Internet"),
+    ("org.briarproject.briar.android", "Briar", "P2P messaging, no servers", "Internet"),
+    # Multimedia
     ("org.videolan.vlc", "VLC", "Plays almost any media", "Multimedia"),
     ("org.schabi.newpipe", "NewPipe", "Lightweight YouTube frontend", "Multimedia"),
-    ("io.github.libretube", "LibreTube", "Private YouTube via Piped", "Multimedia"),
     ("net.sourceforge.opencamera", "Open Camera", "Feature-rich camera", "Multimedia"),
     ("org.fossify.musicplayer", "Fossify Music", "Offline music player", "Multimedia"),
+    ("org.fossify.voicerecorder", "Fossify Recorder", "Simple voice recorder", "Multimedia"),
+    # Navigation
     ("net.osmand.plus", "OsmAnd~", "Offline maps & navigation", "Navigation"),
     ("app.organicmaps", "Organic Maps", "Fast offline maps, no tracking", "Navigation"),
-    ("com.x8bit.bitwarden", "Bitwarden", "Open-source password manager", "Security"),
+    # Security
     ("com.kunzisoft.keepass.libre", "KeePassDX", "Local KeePass password vault", "Security"),
     ("com.beemdevelopment.aegis", "Aegis", "2-factor authenticator", "Security"),
-    ("org.briarproject.briar.android", "Briar", "P2P messaging, no servers", "Security"),
-    ("com.aurora.store", "Aurora Store", "Install Play Store apps, no account", "System"),
+    # System
     ("com.termux", "Termux", "A Linux terminal & environment", "System"),
-    ("com.nutomic.syncthingandroid", "Syncthing", "Peer-to-peer file sync", "System"),
+    ("at.bitfire.davdroid", "DAVx5", "Sync contacts & calendars", "System"),
     ("org.fossify.filemanager", "Fossify Files", "Simple file manager", "System"),
-    ("net.gsantner.markor", "Markor", "Markdown notes & to-dos", "Writing"),
-    ("org.fossify.notes", "Fossify Notes", "Quick offline notes", "Writing"),
-    ("org.kiwix.kiwixmobile", "Kiwix", "Offline Wikipedia & more", "Reading"),
-    ("com.foobnix.pdf.reader", "Librera", "PDF & e-book reader", "Reading"),
+    # Productivity
+    ("net.gsantner.markor", "Markor", "Markdown notes & to-dos", "Productivity"),
+    ("org.fossify.notes", "Fossify Notes", "Quick offline notes", "Productivity"),
+    ("ws.xsoh.etar", "Etar", "Open-source calendar", "Productivity"),
+    ("org.fossify.calendar", "Fossify Calendar", "Calendar & agenda", "Productivity"),
+    ("com.ichi2.anki", "AnkiDroid", "Flashcards & spaced repetition", "Productivity"),
+    ("org.fossify.gallery", "Fossify Gallery", "Photo & video gallery", "Productivity"),
+    # Phone
     ("org.fossify.phone", "Fossify Phone", "Dialer & call manager", "Phone"),
     ("org.fossify.messages", "Fossify Messages", "SMS & MMS messaging", "Phone"),
     ("org.fossify.contacts", "Fossify Contacts", "Contact manager", "Phone"),
-    ("ws.xsoh.etar", "Etar", "Open-source calendar", "Productivity"),
-    ("org.fossify.gallery", "Fossify Gallery", "Photo & video gallery", "Productivity"),
-    ("org.fossify.calculator", "Fossify Calculator", "Everyday calculator", "Productivity"),
-    ("org.fossify.clock", "Fossify Clock", "Alarms, timer, stopwatch", "Productivity"),
+    ("org.fossify.clock", "Fossify Clock", "Alarms, timer, stopwatch", "Phone"),
 ]
 
 # Waydroid state written by `waydroid init`; its presence == "initialized".
@@ -320,28 +330,37 @@ class WaydroidBridge:
                 continue
             apps.append({"package": pkg, "name": name, "summary": summary,
                          "category": cat, "installed": self._pkg_installed(pkg)})
-        cats = sorted({c for _, _, _, c in FDROID_CATALOG})
+        order = ["Stores", "Internet", "Multimedia", "Navigation", "Security",
+                 "System", "Productivity", "Phone"]
+        present = {c for _, _, _, c in FDROID_CATALOG}
+        cats = [c for c in order if c in present] + sorted(present - set(order))
         return {"available": self.available(), "source": STORE_NAME,
                 "categories": cats, "apps": apps}
 
     def _fdroid_apk_url(self, package):
-        """Resolve a package's latest APK URL from F-Droid's lightweight
-        per-package API. Works for ANY F-Droid package, not just the curated
-        list. Returns None if the package isn't on F-Droid or lookup fails."""
-        try:
-            req = urllib.request.Request(
-                FDROID_PKG_API + package, headers={"User-Agent": "AuraOS"})
-            with urllib.request.urlopen(req, timeout=15) as r:
-                meta = json.load(r)
-        except Exception:
-            return None
-        vc = meta.get("suggestedVersionCode")
-        if not vc:
-            pkgs = meta.get("packages") or []
-            vc = pkgs[0].get("versionCode") if pkgs else None
-        if not vc:
-            return None
-        return "%s/%s_%s.apk" % (FDROID_REPO, package, vc)
+        """Resolve a package's latest APK URL from F-Droid's per-package API.
+        The API is occasionally flaky, so we retry once. Returns None if the
+        package genuinely isn't on F-Droid (a 404) or lookup keeps failing."""
+        for attempt in range(2):
+            try:
+                req = urllib.request.Request(
+                    FDROID_PKG_API + package, headers={"User-Agent": "AuraOS"})
+                with urllib.request.urlopen(req, timeout=15) as r:
+                    meta = json.load(r)
+                vc = meta.get("suggestedVersionCode")
+                if not vc:
+                    pkgs = meta.get("packages") or []
+                    vc = pkgs[0].get("versionCode") if pkgs else None
+                if vc:
+                    return "%s/%s_%s.apk" % (FDROID_REPO, package, vc)
+                return None
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    return None          # genuinely not on F-Droid — don't retry
+            except Exception:
+                pass
+            time.sleep(1.0)
+        return None
 
     def store_install(self, package):
         """Install an app from F-Droid by package id: resolve its latest APK,
@@ -364,19 +383,38 @@ class WaydroidBridge:
         return self.install(url)
 
     def launch(self, package):
-        """Bring the session up (if needed) and launch an Android app."""
+        """Bring the session up (if needed) and launch an Android app.
+
+        Crucial fix: `waydroid app launch` silently no-ops if the session is
+        still booting. So we only launch immediately when the session is already
+        RUNNING; otherwise we start it and launch in the background *once it's
+        ready* — the HTTP call returns now (shell shows "opening…") and the app
+        actually appears when Android finishes booting."""
         if not self.available():
             return {"ok": False, "error": "Waydroid not installed"}
         if not package:
             return {"ok": False, "error": "no package given"}
+        running = self._parse_status().get("session", "").upper() == "RUNNING"
         ok, msg = self.ensure_session()
         if not ok:
             return {"ok": False, "error": msg}
-        # launch is best-effort right after start: the session may still be
-        # booting, so the shell shows "opening…" and Waydroid queues the intent.
-        self._run(["app", "launch", package], timeout=15)
+        if running:
+            self._run(["app", "launch", package], timeout=15)
+        else:
+            threading.Thread(target=self._launch_when_ready, args=(package,), daemon=True).start()
         self._touch()
-        return {"ok": True, "package": package, "session": msg}
+        return {"ok": True, "package": package, "session": msg, "starting": not running}
+
+    def _launch_when_ready(self, package):
+        """Wait for the session to finish booting, then launch. First boot of an
+        Android session can take a while, so give it generous time."""
+        for _ in range(30):                       # up to ~60s
+            time.sleep(2)
+            if self._parse_status().get("session", "").upper() == "RUNNING":
+                time.sleep(2)                     # let the launcher settle
+                self._run(["app", "launch", package], timeout=20)
+                self._touch()
+                return
 
     def install(self, source):
         """Install an APK from a local path or an http(s) URL. Cheap: it just

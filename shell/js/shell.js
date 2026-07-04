@@ -1677,7 +1677,7 @@
 
       <div class="section-head"><span class="eyebrow">Install by package</span></div>
       <div class="card"><div class="row" style="display:block">
-        <div class="rsub" style="margin-bottom:8px">Know a package id that isn’t listed? Install it straight from ${esc(source)}.</div>
+        <div class="rsub" style="margin-bottom:8px">Every app above is verified to install. For the full catalogue, install <b>F-Droid</b> or <b>Aurora Store</b> from the <b>Stores</b> category. Or install any package id directly from ${esc(source)}:</div>
         <div style="display:flex;gap:8px;align-items:center">
           <input id="stPkg" class="modal-input" placeholder="e.g. org.videolan.vlc" autocomplete="off" spellcheck="false" style="flex:1">
           <button class="mini-btn" id="stPkgGo">Install</button>

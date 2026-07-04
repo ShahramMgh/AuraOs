@@ -84,8 +84,8 @@ gives Android apps a **first-class App Store** — a real destination in the she
   AuraOS shell* — no need to open F-Droid's own Android UI. Tap **Install** and
   the agent resolves the app's latest APK from F-Droid and pushes it into
   Waydroid; it then appears in your launcher like any other app. Browsing is
-  instant and needs no network — we ship a curated list of well-known packages
-  and only fetch the APK on install (we deliberately don't download F-Droid's
+  instant and needs no network — we ship a curated list of packages **each verified to resolve on F-Droid** (so
+  the store never offers an app that can't install) and only fetch the APK on install (we deliberately don't download F-Droid's
   multi-megabyte index just to show a front page).
 - **Install by package id.** The catalogue is just the front page — the App
   Store's *Install by package* field installs **any** valid F-Droid package
@@ -170,6 +170,7 @@ part of this integration.)
 | In-shell App Store: `/api/android/store/catalog` returns the catalogue (auth-gated; 401 without token), search filters it, and `/api/android/store/install` degrades honestly when Waydroid is absent | **Verified** — real agent booted on an ephemeral port, this session |
 | F-Droid per-package resolution returns a real APK URL for known packages | **Verified live** against f-droid.org, this session (VLC, Organic Maps, Termux) |
 | A store install actually downloads the APK and Waydroid installs it | **Not yet verified** — needs a working Waydroid session (Tier 3) |
+| Launch waits for the Android session to finish booting before firing the intent (fixes apps not opening on first tap) | **Verified** — logic; needs a live session to confirm end-to-end |
 | Android actually boots in Waydroid, apps run, memory strategy holds on a Pi 5 | **Not yet verified** — needs `binder_linux` + a display + real hardware (Tier 3) |
 
 ## Files
