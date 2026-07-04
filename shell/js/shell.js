@@ -1091,6 +1091,120 @@
   }
 
   /* ======================================================================
+     APP STORE (in-shell F-Droid catalogue)
+     A first-class store: browse/search a curated set of free/libre Android
+     apps and install with one tap (the APK is resolved live from F-Droid and
+     pushed into Waydroid). Any package id installs too — the catalogue is just
+     the front page. Direct APK sideload still lives in the Android manager.
+     ====================================================================== */
+  let _appStore = { q: '', cat: 'All' };
+
+  async function renderAppStore() {
+    const id = 'appstore';
+    $('#screenScroll').innerHTML = shead('Apps', 'App Store') + loadingCard();
+    const data = await Sov.androidStoreCatalog('');
+    if (!stillOn(id)) return;
+
+    // Honest degrade: no Android layer → no store.
+    if (data && data.available === false && Sov.mode === 'live') {
+      $('#screenScroll').innerHTML = shead('Apps', 'App Store') + `
+        <div class="card"><div class="row" style="display:block">
+          <div class="rtitle">Android layer not installed</div>
+          <div class="rsub">${esc(data.reason || 'Waydroid is not available on this device, so Android apps can’t be installed.')}</div>
+        </div></div>`;
+      return;
+    }
+
+    const source = (data && data.source) || 'F-Droid';
+    const cats = ['All', ...((data && data.categories) || [])];
+    if (!cats.includes(_appStore.cat)) _appStore.cat = 'All';
+    const all = (data && data.apps) || [];
+
+    $('#screenScroll').innerHTML = `
+      ${shead('Apps', 'App Store', `Install Android apps from ${esc(source)} — free, open, no account.`)}
+      <div class="store-search">${ic('search', 18)}
+        <input id="stSearch" placeholder="Search apps" value="${esc(_appStore.q)}" autocomplete="off" spellcheck="false"></div>
+      <div class="chips" id="stChips">${cats.map(c => `<button class="chip" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+      <div class="store-grid" id="stGrid"></div>
+
+      <div class="section-head"><span class="eyebrow">Install by package</span></div>
+      <div class="card"><div class="row" style="display:block">
+        <div class="rsub" style="margin-bottom:8px">Know a package id that isn’t listed? Install it straight from ${esc(source)}.</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="stPkg" class="modal-input" placeholder="e.g. org.videolan.vlc" autocomplete="off" spellcheck="false" style="flex:1">
+          <button class="mini-btn" id="stPkgGo">Install</button>
+        </div>
+        <div id="stMsg" class="rsub mono" style="margin-top:8px;opacity:.7"></div>
+      </div></div>
+
+      <div class="card" style="margin-top:10px"><div class="row">
+        <span class="glyph">${ic('android', 20)}</span>
+        <span class="rtext"><div class="rtitle">Sideload an APK</div>
+          <div class="rsub">Have an APK file or URL instead? Install it from the Android manager.</div></span>
+        <button class="mini-btn ghost" id="stSideload">Open</button>
+      </div></div>
+      <div style="height:8px"></div>`;
+
+    const doStoreInstall = async (pkg, btn, msgEl) => {
+      if (!pkg) return;
+      if (btn) { btn.textContent = 'Installing…'; btn.disabled = true; }
+      if (msgEl) msgEl.textContent = 'Resolving on ' + source + '…';
+      const r = await Sov.androidStoreInstall(pkg);
+      if (r && r.ok) {
+        toast('Installing ' + pkg + '…', 'good', 'store');
+        Sov.notify.push({ app: 'appstore', title: 'App Store', body: 'Installing ' + pkg, icon: 'store' });
+        renderAppStore();
+      } else {
+        toast((r && r.error) || 'Install failed', 'alert', 'x');
+        if (msgEl) msgEl.textContent = (r && r.error) || 'Install failed.';
+        if (btn) { btn.textContent = 'Install'; btn.disabled = false; }
+      }
+    };
+
+    // Search + category filter repaint only the grid — the search box keeps focus.
+    const paint = () => {
+      const q = _appStore.q.trim().toLowerCase();
+      const apps = all.filter(a =>
+        (_appStore.cat === 'All' || a.category === _appStore.cat) &&
+        (!q || (a.name + ' ' + a.summary + ' ' + a.category + ' ' + a.package).toLowerCase().includes(q)));
+      $$('#stChips [data-cat]').forEach(b => b.classList.toggle('on', b.dataset.cat === _appStore.cat));
+      const grid = $('#stGrid');
+      grid.innerHTML = apps.length ? apps.map(a => `
+        <div class="store-card">
+          <span class="glyph">${ic('android', 22)}</span>
+          <span class="sc-meta">
+            <div class="rtitle">${esc(a.name)}</div>
+            <div class="rsub">${esc(a.summary)}</div>
+          </span>
+          ${a.installed
+            ? `<button class="mini-btn" data-open="${esc(a.package)}">Open</button>`
+            : `<button class="mini-btn accent" data-inst="${esc(a.package)}">Install</button>`}
+        </div>`).join('')
+        : '<div class="row muted">No apps match your search.</div>';
+      grid.querySelectorAll('[data-inst]').forEach(b => b.onclick = () => doStoreInstall(b.dataset.inst, b));
+      grid.querySelectorAll('[data-open]').forEach(b => b.onclick = async () => {
+        const r = await Sov.androidLaunch(b.dataset.open);
+        toast(r && r.ok ? 'Opening Android app…' : ((r && r.error) || 'Could not open'),
+              r && r.ok ? '' : 'alert', r && r.ok ? 'android' : 'x');
+      });
+    };
+    paint();
+
+    $$('#stChips [data-cat]').forEach(b => b.onclick = () => { _appStore.cat = b.dataset.cat; paint(); });
+    const search = $('#stSearch');
+    if (search) search.oninput = () => { _appStore.q = search.value; paint(); };
+
+    const pkgGo = $('#stPkgGo'), pkgIn = $('#stPkg'), msg = $('#stMsg');
+    if (pkgGo) pkgGo.onclick = () => {
+      const v = (pkgIn.value || '').trim();
+      if (!v) { msg.textContent = 'Enter a package id first.'; return; }
+      doStoreInstall(v, pkgGo, msg);
+    };
+    const side = $('#stSideload');
+    if (side) side.onclick = () => go('sys-android');
+  }
+
+  /* ======================================================================
      ANDROID APPS (Waydroid — Native Android Layer)
      Runs Android apps natively while keeping the device light: the heavy
      Android session is off until you open an app and is reclaimed when idle.
@@ -2458,6 +2572,7 @@
     'sys-monitor':  { render: renderMonitor },
     'sys-storage':  { render: renderStorage },
     'sys-android':  { render: renderAndroid },
+    appstore:       { render: renderAppStore },
     'sys-wifi':     { render: renderWifi },
     'sys-bluetooth':{ render: renderBluetooth },
     'sys-display':  { render: renderDisplay },
@@ -2534,7 +2649,8 @@
   // Apps that are built into the shell itself open as full screens, not the
   // sandboxed-app placeholder frame.
   const BUILTIN_SCREEN = { terminal: 'terminal', settings: 'settings', monitor: 'sys-monitor',
-    assistant: 'assistant', files: 'files', clock: 'clock', notes: 'notes', calc: 'calc' };
+    assistant: 'assistant', files: 'files', clock: 'clock', notes: 'notes', calc: 'calc',
+    appstore: 'appstore' };
 
   async function launch(id) {
     const app = Sov.app(id);

@@ -1877,3 +1877,29 @@ input  { font: inherit; }
 .th-chip.on .th-dot { box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 45%, transparent), 0 0 16px color-mix(in srgb, var(--c) 65%, transparent), inset 0 1px 1px rgba(255, 255, 255, .35); }
 .th-name { font-size: 11px; color: var(--text-1); line-height: 1.2; text-align: center; }
 .th-chip.on .th-name { color: var(--text-0); }
+
+/* ── App Store (in-shell F-Droid catalogue) ─────────────────────────────── */
+.store-search { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 42px;
+  background: var(--glass); border: 1px solid var(--line); border-radius: var(--r-md); margin-bottom: 12px; }
+.store-search svg { color: var(--text-2); flex: 0 0 auto; }
+.store-search input { flex: 1; min-width: 0; background: none; border: none; outline: none;
+  color: var(--text-0); font-size: 14px; font-family: inherit; }
+.store-search input::placeholder { color: var(--text-3); }
+.chips { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 10px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: 0 0 auto; padding: 6px 12px; border-radius: 999px; font-size: 12px; color: var(--text-2);
+  background: var(--glass); border: 1px solid var(--line); white-space: nowrap; transition: .15s; }
+.chip.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.store-grid { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 16px; }
+.store-card { display: flex; align-items: center; gap: 12px; padding: 12px;
+  background: var(--glass); border: 1px solid var(--line); border-radius: var(--r-md); }
+.store-card .glyph { flex: 0 0 24px; color: var(--text-2); }
+.store-card .sc-meta { flex: 1 1 auto; min-width: 0; }
+.store-card .sc-meta .rtitle { color: var(--text-0); font-size: 14px; }
+.store-card .sc-meta .rsub { color: var(--text-2); font-size: 12px; margin-top: 2px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.store-card .mini-btn { flex: 0 0 auto; }
+.mini-btn.accent { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.mini-btn.accent:active { background: color-mix(in srgb, var(--accent) 18%, transparent); }

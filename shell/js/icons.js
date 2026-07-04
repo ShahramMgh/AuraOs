@@ -33,6 +33,7 @@ const ICON = (() => {
     list:       `<path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/>`,
     layers:     `<path d="M12 3l9 5-9 5-9-5zM3 13l9 5 9-5M3 17l9 5 9-5"/>`,
     android:    `<path d="M7 11a5 5 0 0 1 10 0v6H7z"/><path d="M8.5 7L7 4.5M15.5 7L17 4.5"/><circle cx="10" cy="10.6" r=".7"/><circle cx="14" cy="10.6" r=".7"/>`,
+    store:      `<path d="M5 10v9h14v-9"/><path d="M3 10l2-5h14l2 5a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0z"/><path d="M10 19v-5h4v5"/>`,
     gear:       `<circle cx="12" cy="12" r="3.2"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2 2M16.4 16.4l2 2M18.4 5.6l-2 2M7.6 16.4l-2 2"/>`,
     back:       `<path d="M15 5l-7 7 7 7"/>`,
     chev:       `<path d="M9 6l6 6-6 6"/>`,

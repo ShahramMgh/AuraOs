@@ -60,6 +60,7 @@ const Sov = (() => {
     { id: 'contacts', name: 'Contacts', glyph: 'contacts',color: '#7A5AD6', cat: 'Essentials', fav: true,  perms: ['contacts'] },
     { id: 'browser',  name: 'Browser',  glyph: 'browser', color: '#D6772E', cat: 'Essentials', fav: true,  net: true },
     { id: 'assistant',name: 'Assistant',glyph: 'spark',   color: '#5A3AD6', cat: 'Essentials', fav: true },
+    { id: 'appstore', name: 'App Store', glyph: 'store',   color: '#2BA869', cat: 'Essentials', fav: true,  net: true },
     { id: 'camera',   name: 'Camera',   glyph: 'cam',     color: '#C0392B', cat: 'Media', uses: ['cam','mic'] },
     { id: 'photos',   name: 'Photos',   glyph: 'photo',   color: '#1B9AA8', cat: 'Media', perms: ['files'] },
     { id: 'music',    name: 'Music',    glyph: 'music',   color: '#C0392B', cat: 'Media' },
@@ -221,8 +222,23 @@ const Sov = (() => {
     initialized: true, sessionRunning: false, idleTimeout: 600, storeInstalled: true,
     apps: [
       { name: 'F-Droid', package: 'org.fdroid.fdroid' },
-      { name: 'Signal', package: 'org.thoughtcrime.securesms' },
       { name: 'NewPipe', package: 'org.schabi.newpipe' },
+    ],
+    // A representative slice of the agent's F-Droid catalogue so the App Store
+    // is fully browsable in a plain-browser preview (live mode replaces this).
+    catalog: [
+      { package: 'org.mozilla.fennec_fdroid', name: 'Firefox', summary: 'Private, open web browser', category: 'Internet' },
+      { package: 'com.wireguard.android', name: 'WireGuard', summary: 'Fast, modern, secure VPN', category: 'Internet' },
+      { package: 'im.vector.app', name: 'Element', summary: 'Secure Matrix chat & calls', category: 'Internet' },
+      { package: 'org.videolan.vlc', name: 'VLC', summary: 'Plays almost any media', category: 'Multimedia' },
+      { package: 'org.schabi.newpipe', name: 'NewPipe', summary: 'Lightweight YouTube frontend', category: 'Multimedia' },
+      { package: 'net.osmand.plus', name: 'OsmAnd~', summary: 'Offline maps & navigation', category: 'Navigation' },
+      { package: 'app.organicmaps', name: 'Organic Maps', summary: 'Fast offline maps, no tracking', category: 'Navigation' },
+      { package: 'com.x8bit.bitwarden', name: 'Bitwarden', summary: 'Open-source password manager', category: 'Security' },
+      { package: 'com.beemdevelopment.aegis', name: 'Aegis', summary: '2-factor authenticator', category: 'Security' },
+      { package: 'com.aurora.store', name: 'Aurora Store', summary: 'Install Play Store apps, no account', category: 'System' },
+      { package: 'com.termux', name: 'Termux', summary: 'A Linux terminal & environment', category: 'System' },
+      { package: 'net.gsantner.markor', name: 'Markor', summary: 'Markdown notes & to-dos', category: 'Writing' },
     ],
   };
 
@@ -395,6 +411,31 @@ const Sov = (() => {
       if (mode === 'live') return post('/api/android/show', {}, 20000, 1);
       simAndroid.sessionRunning = true;                 // sim: session comes up
       emit();
+      return { ok: true, sim: true };
+    },
+    // The in-shell F-Droid App Store: browse the catalogue (instant, no APK
+    // download) and install by package id (resolves + pulls the APK live).
+    async androidStoreCatalog(query) {
+      if (mode === 'live') {
+        const r = await getJSON('/api/android/store/catalog' +
+          (query ? '?q=' + encodeURIComponent(query) : ''));
+        if (r) return r;
+      }
+      const installed = new Set(simAndroid.apps.map(a => a.package));
+      const q = (query || '').trim().toLowerCase();
+      const apps = simAndroid.catalog
+        .filter(a => !q || (a.name + ' ' + a.summary + ' ' + a.category + ' ' + a.package).toLowerCase().includes(q))
+        .map(a => ({ ...a, installed: installed.has(a.package) }));
+      const categories = [...new Set(simAndroid.catalog.map(a => a.category))].sort();
+      return { available: true, source: 'F-Droid', categories, apps, sim: true };
+    },
+    async androidStoreInstall(pkg) {
+      // resolves the APK from F-Droid then installs — allow real time, no retry
+      if (mode === 'live') return post('/api/android/store/install', { package: pkg }, 180000, 1);
+      const hit = simAndroid.catalog.find(a => a.package === pkg);
+      if (hit && !simAndroid.apps.some(a => a.package === pkg)) {
+        simAndroid.apps.push({ name: hit.name, package: hit.package });
+      }
       return { ok: true, sim: true };
     },
 

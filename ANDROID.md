@@ -73,18 +73,38 @@ The levers, all real and all applied by `60-waydroid.sh` + `waydroid_bridge.py`:
 7. **GApps-free.** Vanilla Waydroid — no Google Play Services idling in the
    background (a large, permanent RAM/CPU/network drain). Install apps directly.
 
-## Getting apps — a graphical store (F-Droid)
+## Getting apps — the in-shell App Store (F-Droid-backed)
 
-Apps are installed by **browsing a store**, not by hunting down APK URLs:
+Apps are installed by **browsing a store**, not by hunting down APK URLs. AuraOS
+gives Android apps a **first-class App Store** — a real destination in the shell
+(home + app drawer), not a setting buried three taps deep:
 
-- **F-Droid** — free/libre apps, reproducible builds, no Google account — is
-  **auto-installed on the first Android session** (toggle with
-  `AURA_ANDROID_FDROID=0`). It's a normal app: it only runs when you open
-  it, so it doesn't add to the idle footprint. Open it from the launcher (or
-  **Settings › Android › App store › Open**), browse, tap install.
-- **Sideload** — for an app not in a store, **Settings › Android › Sideload**
-  takes an APK **file path** or **URL** and runs `waydroid app install`.
+- **In-shell F-Droid catalogue.** The **App Store** app renders a browsable,
+  searchable, category-filtered catalogue of free/libre Android apps *inside the
+  AuraOS shell* — no need to open F-Droid's own Android UI. Tap **Install** and
+  the agent resolves the app's latest APK from F-Droid and pushes it into
+  Waydroid; it then appears in your launcher like any other app. Browsing is
+  instant and needs no network — we ship a curated list of well-known packages
+  and only fetch the APK on install (we deliberately don't download F-Droid's
+  multi-megabyte index just to show a front page).
+- **Install by package id.** The catalogue is just the front page — the App
+  Store's *Install by package* field installs **any** valid F-Droid package
+  (e.g. `org.videolan.vlc`), resolved live via F-Droid's per-package API. So the
+  whole F-Droid repository is reachable, not only the curated set.
+- **F-Droid the app** — free/libre apps, reproducible builds, no Google account —
+  is still **auto-installed on the first Android session** (toggle with
+  `AURA_ANDROID_FDROID=0`) for anyone who prefers its own richer UI. It's a
+  normal app: it only runs when you open it, so it adds nothing to the idle
+  footprint.
+- **Sideload** — for an app not on F-Droid, **App Store › Sideload** (or
+  **Settings › Android › Sideload**) takes an APK **file path** or **URL** and
+  runs `waydroid app install`.
 - Removal is `waydroid app remove`. Nothing leaves a resident process behind.
+
+The catalogue and APK resolution live in `agent/waydroid_bridge.py`
+(`FDROID_CATALOG`, `store_catalog`, `store_install`, `_fdroid_apk_url`), served
+at `/api/android/store/catalog` and `/api/android/store/install`; the App Store
+screen is `renderAppStore()` in `shell/js/shell.js`.
 
 **No Play Store by default, on purpose.** The Play Store needs a GApps image —
 Google Play Services running permanently, plus a Google account: exactly the
@@ -103,7 +123,9 @@ the default.
 | `/api/android/install` | POST | `{source}` — APK path or `http(s)` URL |
 | `/api/android/remove` | POST | `{package}` |
 | `/api/android/session` | POST | `{action: start\|stop}` — the shell's power switch |
-| `/api/android/store` | POST | `{action: install\|open}` — the F-Droid graphical store |
+| `/api/android/store` | POST | `{action: install\|open}` — the F-Droid graphical store (the Android app) |
+| `/api/android/store/catalog` | GET | `?q=` — the in-shell F-Droid catalogue `[{package, name, summary, category, installed}]` |
+| `/api/android/store/install` | POST | `{package}` — resolve the app's latest APK on F-Droid and install it |
 | `/api/android/show` | POST | present the full Android UI as one surface |
 
 All of it degrades honestly: if Waydroid isn't installed the endpoints return
@@ -145,6 +167,9 @@ part of this integration.)
 | A Waydroid `.desktop` app is discovered in the launcher catalogue like a native app; its own icon serves via `/api/appicon` (auth-gated, traversal-guarded); launching it routes through the bridge while a native app does not | **Verified** — real Ubuntu 24.04 arm64 container, this session |
 | `60-waydroid.sh` completes under `set -euo pipefail` and lays down the slice, module config, env, and first-boot init | **Verified** — real Ubuntu 24.04 arm64 container, this session |
 | Shell Android panel + launcher render and drive the API (SIM + live shapes) | **Verified** — JS checks + SIM path |
+| In-shell App Store: `/api/android/store/catalog` returns the catalogue (auth-gated; 401 without token), search filters it, and `/api/android/store/install` degrades honestly when Waydroid is absent | **Verified** — real agent booted on an ephemeral port, this session |
+| F-Droid per-package resolution returns a real APK URL for known packages | **Verified live** against f-droid.org, this session (VLC, Organic Maps, Termux) |
+| A store install actually downloads the APK and Waydroid installs it | **Not yet verified** — needs a working Waydroid session (Tier 3) |
 | Android actually boots in Waydroid, apps run, memory strategy holds on a Pi 5 | **Not yet verified** — needs `binder_linux` + a display + real hardware (Tier 3) |
 
 ## Files
@@ -152,15 +177,17 @@ part of this integration.)
 ```
 60-waydroid.sh              build step: install waydroid, memory slice + zram,
                             module config, first-boot init/props oneshot
-agent/waydroid_bridge.py    the on-demand session + app-lifecycle bridge
-agent/aura-agent.py    /api/android/* routes; .desktop discovery routes
-                            Waydroid apps to the bridge; /api/appicon serves
-                            real app icons; ProtectHome relaxed so ~ is readable
-shell/js/api.js             android* methods + SIM mirror; appIconUrl(); SIM
-                            catalogue includes Android apps (blended in)
-shell/js/shell.js           launcher shows every app's own icon; Settings ›
-                            Apps › Android manager view
-70-aura-shell.sh       agent service ProtectHome=read-only (discover ~ apps)
+agent/waydroid_bridge.py    the on-demand session + app-lifecycle bridge; the
+                            F-Droid catalogue (FDROID_CATALOG), store_catalog,
+                            store_install, _fdroid_apk_url
+agent/aura-agent.py         /api/android/* routes incl. store/catalog + store/
+                            install; .desktop discovery routes Waydroid apps to
+                            the bridge; /api/appicon serves real app icons
+shell/js/api.js             android* methods + SIM mirror; androidStoreCatalog/
+                            androidStoreInstall; appIconUrl(); SIM catalogue
+shell/js/shell.js           first-class App Store screen (renderAppStore) +
+                            Settings › Apps › Android manager; launcher icons
+70-aura-shell.sh            agent service ProtectHome=read-only (discover ~ apps)
 ```
 
 The launcher integration touches the agent's existing `.desktop` discovery

@@ -25,6 +25,7 @@
 # root. First-time `waydroid init` (downloads the system image, writes to
 # /var/lib/waydroid) IS privileged and is done once by aura-waydroid-init
 # at first boot, not from here.
+import json
 import os
 import shutil
 import subprocess
@@ -46,6 +47,54 @@ STORE_PKG = "org.fdroid.fdroid"
 STORE_NAME = "F-Droid"
 STORE_APK_URL = "https://f-droid.org/F-Droid.apk"
 AUTO_STORE = os.environ.get("AURA_ANDROID_FDROID", "1") not in ("0", "false", "no", "")
+
+# The in-shell App Store is F-Droid-backed. We don't ship (or download on-device)
+# F-Droid's whole multi-megabyte index just to show a catalogue; instead we keep
+# a curated list of well-known F-Droid packages for instant, offline browsing,
+# and resolve the actual APK **live** at install time via F-Droid's lightweight
+# per-package API. Installing by *any* package id works too (see store_install),
+# so the store isn't limited to this list — it's just the browsable front page.
+FDROID_REPO = "https://f-droid.org/repo"
+FDROID_PKG_API = "https://f-droid.org/api/v1/packages/"
+
+# (package, name, one-line summary, category) — all real, free/libre F-Droid apps.
+FDROID_CATALOG = [
+    ("org.mozilla.fennec_fdroid", "Firefox", "Private, open web browser", "Internet"),
+    ("org.torproject.android", "Orbot", "Tor for Android — route apps over Tor", "Internet"),
+    ("com.wireguard.android", "WireGuard", "Fast, modern, secure VPN", "Internet"),
+    ("com.nextcloud.client", "Nextcloud", "Your own private cloud", "Internet"),
+    ("im.vector.app", "Element", "Secure Matrix chat & calls", "Internet"),
+    ("com.keylesspalace.tusky", "Tusky", "A Mastodon client", "Internet"),
+    ("de.danoeh.antennapod", "AntennaPod", "Podcast manager & player", "Internet"),
+    ("com.nononsenseapps.feeder", "Feeder", "Lightweight RSS reader", "Internet"),
+    ("com.fsck.k9", "K-9 Mail", "Advanced email client", "Internet"),
+    ("org.videolan.vlc", "VLC", "Plays almost any media", "Multimedia"),
+    ("org.schabi.newpipe", "NewPipe", "Lightweight YouTube frontend", "Multimedia"),
+    ("io.github.libretube", "LibreTube", "Private YouTube via Piped", "Multimedia"),
+    ("net.sourceforge.opencamera", "Open Camera", "Feature-rich camera", "Multimedia"),
+    ("org.fossify.musicplayer", "Fossify Music", "Offline music player", "Multimedia"),
+    ("net.osmand.plus", "OsmAnd~", "Offline maps & navigation", "Navigation"),
+    ("app.organicmaps", "Organic Maps", "Fast offline maps, no tracking", "Navigation"),
+    ("com.x8bit.bitwarden", "Bitwarden", "Open-source password manager", "Security"),
+    ("com.kunzisoft.keepass.libre", "KeePassDX", "Local KeePass password vault", "Security"),
+    ("com.beemdevelopment.aegis", "Aegis", "2-factor authenticator", "Security"),
+    ("org.briarproject.briar.android", "Briar", "P2P messaging, no servers", "Security"),
+    ("com.aurora.store", "Aurora Store", "Install Play Store apps, no account", "System"),
+    ("com.termux", "Termux", "A Linux terminal & environment", "System"),
+    ("com.nutomic.syncthingandroid", "Syncthing", "Peer-to-peer file sync", "System"),
+    ("org.fossify.filemanager", "Fossify Files", "Simple file manager", "System"),
+    ("net.gsantner.markor", "Markor", "Markdown notes & to-dos", "Writing"),
+    ("org.fossify.notes", "Fossify Notes", "Quick offline notes", "Writing"),
+    ("org.kiwix.kiwixmobile", "Kiwix", "Offline Wikipedia & more", "Reading"),
+    ("com.foobnix.pdf.reader", "Librera", "PDF & e-book reader", "Reading"),
+    ("org.fossify.phone", "Fossify Phone", "Dialer & call manager", "Phone"),
+    ("org.fossify.messages", "Fossify Messages", "SMS & MMS messaging", "Phone"),
+    ("org.fossify.contacts", "Fossify Contacts", "Contact manager", "Phone"),
+    ("ws.xsoh.etar", "Etar", "Open-source calendar", "Productivity"),
+    ("org.fossify.gallery", "Fossify Gallery", "Photo & video gallery", "Productivity"),
+    ("org.fossify.calculator", "Fossify Calculator", "Everyday calculator", "Productivity"),
+    ("org.fossify.clock", "Fossify Clock", "Alarms, timer, stopwatch", "Productivity"),
+]
 
 # Waydroid state written by `waydroid init`; its presence == "initialized".
 _CFG = "/var/lib/waydroid/waydroid.cfg"
@@ -250,6 +299,69 @@ class WaydroidBridge:
         if action == "status":
             return {"ok": True, **self.store_status()}
         return {"ok": False, "error": "unknown action"}
+
+    # ── in-shell F-Droid catalogue (browse + one-tap install) ────────────────
+    def _pkg_installed(self, package):
+        """True if an Android package is installed, by its .desktop launcher —
+        cheap and works with the session off (same trick as _store_installed)."""
+        p = os.path.expanduser(
+            "~/.local/share/applications/waydroid." + package + ".desktop")
+        return os.path.exists(p)
+
+    def store_catalog(self, query=""):
+        """The browsable F-Droid front page: the curated catalogue, filterable
+        by a search string, each app flagged if already installed. No network —
+        browsing is instant; the APK is only fetched when the user installs."""
+        q = (query or "").strip().lower()
+        apps = []
+        for pkg, name, summary, cat in FDROID_CATALOG:
+            hay = (name + " " + summary + " " + cat + " " + pkg).lower()
+            if q and q not in hay:
+                continue
+            apps.append({"package": pkg, "name": name, "summary": summary,
+                         "category": cat, "installed": self._pkg_installed(pkg)})
+        cats = sorted({c for _, _, _, c in FDROID_CATALOG})
+        return {"available": self.available(), "source": STORE_NAME,
+                "categories": cats, "apps": apps}
+
+    def _fdroid_apk_url(self, package):
+        """Resolve a package's latest APK URL from F-Droid's lightweight
+        per-package API. Works for ANY F-Droid package, not just the curated
+        list. Returns None if the package isn't on F-Droid or lookup fails."""
+        try:
+            req = urllib.request.Request(
+                FDROID_PKG_API + package, headers={"User-Agent": "AuraOS"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                meta = json.load(r)
+        except Exception:
+            return None
+        vc = meta.get("suggestedVersionCode")
+        if not vc:
+            pkgs = meta.get("packages") or []
+            vc = pkgs[0].get("versionCode") if pkgs else None
+        if not vc:
+            return None
+        return "%s/%s_%s.apk" % (FDROID_REPO, package, vc)
+
+    def store_install(self, package):
+        """Install an app from F-Droid by package id: resolve its latest APK,
+        then push it into Android via the normal install path. Not limited to
+        the curated catalogue — any valid F-Droid package id resolves."""
+        if not self.available():
+            return {"ok": False, "error": "Waydroid not installed"}
+        if not self.initialized():
+            return {"ok": False, "error": "Android runtime not set up yet"}
+        if not package:
+            return {"ok": False, "error": "no package given"}
+        if self._busy:
+            return {"ok": False, "error": "another install is in progress"}
+        self._install_msg = "Finding %s on %s…" % (package, STORE_NAME)
+        url = self._fdroid_apk_url(package)
+        if not url:
+            self._install_msg = ""
+            return {"ok": False,
+                    "error": "'%s' was not found on %s." % (package, STORE_NAME)}
+        return self.install(url)
 
     def launch(self, package):
         """Bring the session up (if needed) and launch an Android app."""

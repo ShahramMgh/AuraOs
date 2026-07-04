@@ -1119,6 +1119,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, ANDROID.status())
         if p == "/api/android/apps":
             return self._send(200, ANDROID.list_apps())
+        if p == "/api/android/store/catalog":
+            q = parse_qs(urlsplit(self.path).query)
+            return self._send(200, ANDROID.store_catalog(q.get("q", [""])[0]))
         return self._serve_static(p)
 
     def _vault_used(self):
@@ -1307,6 +1310,14 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/android/store":
             # install or open the graphical app store (F-Droid)
             return self._send(200, ANDROID.store(body.get("action", "")))
+        if p == "/api/android/store/install":
+            # one-tap install from the in-shell F-Droid catalogue by package id
+            pkg = body.get("package", "")
+            res = ANDROID.store_install(pkg)
+            if res.get("ok"):
+                AI.observe("install_android_app", {"package": pkg},
+                           body.get("bySov") and "assistant" or "user")
+            return self._send(200, res)
         if p == "/api/android/show":
             return self._send(200, ANDROID.show_full_ui())
 
