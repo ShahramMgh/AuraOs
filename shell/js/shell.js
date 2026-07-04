@@ -2962,7 +2962,7 @@
       }
     }
 
-    await Sov.launch(id);
+    await Sov.launch(id, false);   // run in-phone; never spawn a desktop app on the host
     // acquire any granted sensors so the trust ribbon lights up honestly
     const now = Sov.perms(id);
     (app.uses || []).forEach(s => { if (now[sensMap[s]] !== 'deny') Sov.acquireSensor(s, id); });
@@ -3007,20 +3007,42 @@
   /* ======================================================================
      APP FRAME
      ====================================================================== */
+  // Each catalog app has an in-phone view (it runs INSIDE the phone — never a
+  // desktop app on the host). Browser is a real iframe, Camera a real webcam,
+  // Maps a real OSM embed; the rest are functional in-phone experiences.
+  let _camStream = null, _musicTimer = null;
+  const APP_VIEWS = {
+    browser:  { render: browserView,  wire: wireBrowser },
+    camera:   { render: cameraView,   wire: wireCamera,  close: stopCam },
+    maps:     { render: mapsView },
+    music:    { render: musicView,    wire: wireMusic,   close: () => clearInterval(_musicTimer) },
+    phone:    { render: phoneView,    wire: wirePhone },
+    messages: { render: messagesView, wire: wireMessages },
+    contacts: { render: contactsView, wire: wireContacts },
+    photos:   { render: photosView,   wire: wirePhotos },
+  };
+  function placeholderView(app) {
+    return `<div class="af-placeholder">
+      <div class="af-badge" style="--tint:${app.color}">${ic(app.glyph,30)}</div>
+      <div class="af-name">${esc(app.name)}</div>
+      <div class="af-note">Running inside AuraOS.</div></div>`;
+  }
+
   function openAppFrame(app) {
     S.appOpen = app.id;
-    const sens = Sov.activeSensorsFor(app.id);
-    const note = sens.length
-      ? `Using ${sens.map(s => ({ mic: 'microphone', cam: 'camera', loc: 'location' }[s])).join(' + ')} — see the dot up top.`
-      : (Sov.get().mode === 'live'
-          ? 'Launched as a sandboxed app.'
-          : 'This is a preview placeholder. On a real device this launches the sandboxed app.');
+    const view = APP_VIEWS[app.id];
     $('#appframe').innerHTML = `
-      <div class="appframe-body">
-        <div class="af-badge" style="--tint:${app.color}">${ic(app.glyph,30)}</div>
-        <div class="af-name">${esc(app.name)}</div>
-        <div class="af-note">${note}</div>
+      <div class="af-app">
+        <div class="af-bar">
+          <button class="af-nav" id="afBack" aria-label="Back">${ic('back',18)}</button>
+          <span class="af-title"><span class="af-dot" style="background:${app.color}"></span>${esc(app.name)}</span>
+          <button class="af-nav" id="afHome" aria-label="Home">${ic('home',16)}</button>
+        </div>
+        <div class="af-view" id="afView">${view ? view.render(app) : placeholderView(app)}</div>
       </div>`;
+    $('#afBack').onclick = () => back();
+    $('#afHome').onclick = () => goHome();
+    if (view && view.wire) { try { view.wire(app); } catch (e) {} }
     $('#appframe').classList.add('open');
     if (typeof Aura !== 'undefined') Aura.stop();   // home is covered
     updateHelm();
@@ -3028,14 +3050,213 @@
   }
   function closeAppFrame(silent) {
     // Backgrounding an app does NOT release its sensors — a running app can keep
-    // using mic/camera/location in the background, and that's exactly when the
-    // Aura + live ribbon must show it. Sensors release only when the app is
-    // actually closed (recents), cut off, or its permission is revoked.
+    // using mic/camera/location in the background. Sensors release only when the
+    // app is actually closed (recents), cut off, or its permission is revoked.
+    const id = S.appOpen, view = id && APP_VIEWS[id];
+    if (view && view.close) { try { view.close(); } catch (e) {} }
     $('#appframe').classList.remove('open');
+    $('#appframe').innerHTML = '';   // tear down iframes / video cleanly
     S.appOpen = null;
     if (!silent && S.view === 'home') renderHome();
     updateHelm();
     updateInsight();   // back to device-wide context
+  }
+
+  /* ---- Browser — a real iframe with a start page + address bar ------------ */
+  const BR_BOOKMARKS = [
+    { name: 'Wikipedia', url: 'https://en.wikipedia.org' },
+    { name: 'OpenStreetMap', url: 'https://www.openstreetmap.org' },
+    { name: 'MDN', url: 'https://developer.mozilla.org' },
+    { name: 'Hacker News', url: 'https://news.ycombinator.com' },
+    { name: 'example.com', url: 'https://example.com' },
+  ];
+  function browserView() {
+    return `
+      <div class="br-bar">
+        <button class="br-btn" id="brBack">${ic('back',15)}</button>
+        <button class="br-btn" id="brReload">${ic('restart',14)}</button>
+        <input id="brUrl" class="br-url" placeholder="Search or enter address" autocomplete="off" spellcheck="false">
+        <button class="br-btn go" id="brGo">${ic('search',14)}</button>
+      </div>
+      <div class="br-stage">
+        <iframe id="brFrame" class="br-frame" referrerpolicy="no-referrer"></iframe>
+        <div class="br-start" id="brStart">
+          <div class="br-logo">${ic('browser',34)}</div>
+          <div class="br-h">AuraOS Browser</div>
+          <div class="br-sub">Type a URL or search — pages open right here in the phone.</div>
+          <div class="br-marks">${BR_BOOKMARKS.map(b => `<button class="br-mark" data-url="${b.url}">${esc(b.name)}</button>`).join('')}</div>
+          <div class="br-note">Some sites decline to be embedded — their choice, same as any browser.</div>
+        </div>
+      </div>`;
+  }
+  function wireBrowser() {
+    const frame = $('#brFrame'), url = $('#brUrl'), start = $('#brStart');
+    const norm = v => {
+      v = (v || '').trim(); if (!v) return null;
+      if (/^https?:\/\//i.test(v)) return v;
+      if (/^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(v)) return 'https://' + v;
+      return 'https://duckduckgo.com/?q=' + encodeURIComponent(v);
+    };
+    const goURL = v => { const u = norm(v); if (!u) return; start.style.display = 'none'; frame.src = u; if (url) url.value = u; };
+    $('#brGo').onclick = () => goURL(url.value);
+    url.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') goURL(url.value); };
+    $('#brReload').onclick = () => { if (frame.src) { const s = frame.src; frame.src = 'about:blank'; setTimeout(() => { frame.src = s; }, 30); } };
+    $('#brBack').onclick = () => { try { frame.contentWindow.history.back(); } catch (_) { start.style.display = ''; frame.removeAttribute('src'); } };
+    $$('#brStart [data-url]').forEach(b => b.onclick = () => goURL(b.dataset.url));
+  }
+
+  /* ---- Camera — the real webcam via getUserMedia (lights the sensor dot) -- */
+  function stopCam() { if (_camStream) { _camStream.getTracks().forEach(t => t.stop()); _camStream = null; } }
+  function cameraView() {
+    return `
+      <div class="cam-stage">
+        <video id="camVideo" class="cam-video" autoplay playsinline muted></video>
+        <canvas id="camShot" class="cam-shot"></canvas>
+        <div id="camMsg" class="cam-msg"></div>
+      </div>
+      <div class="cam-controls">
+        <button class="cam-shutter" id="camSnap" aria-label="Capture"></button>
+        <button class="mini-btn ghost" id="camReset" style="display:none">Retake</button>
+      </div>`;
+  }
+  async function wireCamera() {
+    const v = $('#camVideo'), c = $('#camShot'), msg = $('#camMsg'), snap = $('#camSnap'), reset = $('#camReset');
+    try {
+      _camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+      if (!S.appOpen) { stopCam(); return; }   // closed while we were asking
+      v.srcObject = _camStream;
+    } catch (e) {
+      if (msg) { msg.textContent = 'No camera available (or access was declined).'; msg.classList.add('show'); }
+      return;
+    }
+    snap.onclick = () => {
+      if (!v.videoWidth) return;
+      c.width = v.videoWidth; c.height = v.videoHeight;
+      c.getContext('2d').drawImage(v, 0, 0);
+      c.classList.add('show'); reset.style.display = '';
+      toast('Photo captured', 'ok', 'check');
+    };
+    reset.onclick = () => { c.classList.remove('show'); reset.style.display = 'none'; };
+  }
+
+  /* ---- Maps — a real OpenStreetMap embed (OSM permits framing) ------------ */
+  function mapsView() {
+    const src = 'https://www.openstreetmap.org/export/embed.html?bbox=-0.16,51.49,-0.11,51.515&layer=mapnik&marker=51.5024,-0.1348';
+    return `<iframe class="maps-frame" src="${src}" referrerpolicy="no-referrer"></iframe>`;
+  }
+
+  /* ---- Music — a functional in-phone player (simulated playback) ---------- */
+  const MUSIC = [
+    { title: 'Petrol Dawn', artist: 'Aura', len: 214, col: '#1B82A8' },
+    { title: 'Signal Bloom', artist: 'Aura', len: 187, col: '#5A3AD6' },
+    { title: 'Night Light', artist: 'Aura', len: 241, col: '#C0392B' },
+    { title: 'Quiet Cores', artist: 'Aura', len: 168, col: '#2BA869' },
+  ];
+  const fmtDur = s => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  let _mu = { i: 0, pos: 0, playing: false };
+  function musicView() {
+    const t = MUSIC[0];
+    return `
+      <div class="mu-art" id="muArt" style="--c:${t.col}">${ic('music',52)}</div>
+      <div class="mu-title" id="muTitle">${esc(t.title)}</div>
+      <div class="mu-artist" id="muArtist">${esc(t.artist)}</div>
+      <div class="mu-seek"><div class="mu-fill" id="muFill"></div></div>
+      <div class="mu-time"><span id="muCur">0:00</span><span id="muLen">${fmtDur(t.len)}</span></div>
+      <div class="mu-ctrls">
+        <button class="mu-btn" id="muPrev">${ic('back',20)}</button>
+        <button class="mu-play" id="muPlay">${ic('play',24)}</button>
+        <button class="mu-btn" id="muNext" style="transform:scaleX(-1)">${ic('back',20)}</button>
+      </div>
+      <div class="mu-list" id="muList">${MUSIC.map((m, i) => `<button class="mu-row" data-tr="${i}"><span class="mu-dot" style="background:${m.col}"></span><span class="mu-rt">${esc(m.title)}</span><span class="mu-rl">${fmtDur(m.len)}</span></button>`).join('')}</div>`;
+  }
+  function wireMusic() {
+    _mu = { i: 0, pos: 0, playing: false };
+    const paint = () => {
+      const t = MUSIC[_mu.i];
+      $('#muArt').style.setProperty('--c', t.col);
+      $('#muTitle').textContent = t.title; $('#muArtist').textContent = t.artist;
+      $('#muLen').textContent = fmtDur(t.len); $('#muCur').textContent = fmtDur(Math.floor(_mu.pos));
+      $('#muFill').style.width = (_mu.pos / t.len * 100) + '%';
+      $('#muPlay').innerHTML = ic(_mu.playing ? 'stop' : 'play', 24);
+      $$('#muList [data-tr]').forEach(b => b.classList.toggle('on', +b.dataset.tr === _mu.i));
+    };
+    clearInterval(_musicTimer);
+    _musicTimer = setInterval(() => {
+      if (!_mu.playing) return;
+      _mu.pos += 1;
+      if (_mu.pos >= MUSIC[_mu.i].len) { _mu.i = (_mu.i + 1) % MUSIC.length; _mu.pos = 0; }
+      paint();
+    }, 1000);
+    $('#muPlay').onclick = () => { _mu.playing = !_mu.playing; paint(); };
+    $('#muPrev').onclick = () => { _mu.i = (_mu.i - 1 + MUSIC.length) % MUSIC.length; _mu.pos = 0; paint(); };
+    $('#muNext').onclick = () => { _mu.i = (_mu.i + 1) % MUSIC.length; _mu.pos = 0; paint(); };
+    $$('#muList [data-tr]').forEach(b => b.onclick = () => { _mu.i = +b.dataset.tr; _mu.pos = 0; _mu.playing = true; paint(); });
+    paint();
+  }
+
+  /* ---- Phone — a dialer keypad -------------------------------------------- */
+  function phoneView() {
+    const keys = ['1','2','3','4','5','6','7','8','9','*','0','#'];
+    const sub = { '2':'ABC','3':'DEF','4':'GHI','5':'JKL','6':'MNO','7':'PQRS','8':'TUV','9':'WXYZ' };
+    return `
+      <div class="ph-num" id="phNum"></div>
+      <div class="ph-pad">${keys.map(k => `<button class="ph-key" data-k="${k}"><span class="ph-d">${k}</span><span class="ph-s">${sub[k] || ''}</span></button>`).join('')}</div>
+      <div class="ph-actions"><button class="ph-del" id="phDel">${ic('back',18)}</button><button class="ph-call" id="phCall">${ic('phone',24)}</button><span style="width:44px"></span></div>`;
+  }
+  function wirePhone() {
+    const num = $('#phNum');
+    $$('#afView [data-k]').forEach(b => b.onclick = () => { num.textContent += b.dataset.k; });
+    $('#phDel').onclick = () => { num.textContent = num.textContent.slice(0, -1); };
+    $('#phCall').onclick = () => { if (num.textContent) toast('Calling ' + num.textContent + '…', '', 'phone'); };
+  }
+
+  /* ---- Messages — a chat thread ------------------------------------------- */
+  function messagesView() {
+    return `
+      <div class="ms-thread" id="msThread">
+        <div class="ms-in">Hey! Is the new AuraOS build ready?</div>
+        <div class="ms-out">Yep — Android apps and the App Store just landed.</div>
+        <div class="ms-in">Nice. Does the browser open in the phone now?</div>
+      </div>
+      <div class="ms-compose"><input id="msIn" placeholder="Message" autocomplete="off"><button class="mini-btn" id="msSend">Send</button></div>`;
+  }
+  function wireMessages() {
+    const thread = $('#msThread'), inp = $('#msIn');
+    const send = () => {
+      const v = (inp.value || '').trim(); if (!v) return;
+      const d = document.createElement('div'); d.className = 'ms-out'; d.textContent = v;
+      thread.appendChild(d); inp.value = ''; thread.scrollTop = thread.scrollHeight;
+      setTimeout(() => { const r = document.createElement('div'); r.className = 'ms-in'; r.textContent = 'Got it 👍'; thread.appendChild(r); thread.scrollTop = thread.scrollHeight; }, 900);
+    };
+    $('#msSend').onclick = send;
+    inp.onkeydown = e => { e.stopPropagation(); if (e.key === 'Enter') send(); };
+  }
+
+  /* ---- Contacts — a list --------------------------------------------------- */
+  const CONTACTS = ['Ada Lovelace','Alan Turing','Grace Hopper','Linus Torvalds','Margaret Hamilton','Dennis Ritchie','Radia Perlman','Ken Thompson'];
+  function contactsView() {
+    return `<div class="ct-list">${CONTACTS.map(n => {
+      const initials = n.split(' ').map(w => w[0]).join('');
+      return `<div class="ct-row"><span class="ct-av">${initials}</span><span class="ct-name">${esc(n)}</span><span class="ct-call">${ic('phone',15)}</span></div>`;
+    }).join('')}</div>`;
+  }
+  function wireContacts() {
+    $$('#afView .ct-row').forEach(r => r.querySelector('.ct-call').onclick =
+      () => toast('Calling ' + r.querySelector('.ct-name').textContent + '…', '', 'phone'));
+  }
+
+  /* ---- Photos — a gallery -------------------------------------------------- */
+  function photosView() {
+    const cols = ['#1B82A8','#5A3AD6','#C0392B','#2BA869','#C8A020','#1B9AA8','#2E7FD6','#7A5AD6','#D6772E','#3A4A5A','#1B6E5A','#8896A6'];
+    const tiles = cols.map((c, i) => `<button class="pg-tile" data-i="${i}" style="background:linear-gradient(135deg, ${c}, ${c}66)"></button>`).join('');
+    return `<div class="pg-grid">${tiles}</div><div class="pg-view" id="pgView"></div>`;
+  }
+  function wirePhotos() {
+    const view = $('#pgView');
+    $$('#afView .pg-tile').forEach(t => t.onclick = () => {
+      view.style.background = t.style.background; view.classList.add('show');
+      view.onclick = () => view.classList.remove('show');
+    });
   }
 
   /* ======================================================================

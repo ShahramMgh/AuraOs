@@ -335,10 +335,14 @@ const Sov = (() => {
     running() { return sim.running.map(r => ({ ...r })); },
     isRunning(id) { return sim.running.some(r => r.appId === id); },
 
-    async launch(id) {
+    // hostLaunch=false → the app runs *inside* the shell (in-phone app view), so
+    // we do NOT ask the agent to spawn a desktop app on the host machine. We keep
+    // the running/recents bookkeeping and (live) let the AI observe the launch.
+    async launch(id, hostLaunch = true) {
       const app = this.app(id);
       if (!app) return { ok: false };
-      await post('/api/launch', { app: id });
+      if (hostLaunch) await post('/api/launch', { app: id });
+      else if (mode === 'live') post('/api/ai/observe', { event: 'open_app', data: { name: id } }, 8000, 1);
       // Live: the agent observes the launch for routine-learning. Sim: mirror it
       // here so the browser preview learns from behaviour too (same data shape).
       if (mode !== 'live') SIMAI.observe('open_app', { name: id });
