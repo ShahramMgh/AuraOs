@@ -3188,6 +3188,13 @@
     const target = view === 'home' ? 'v-home' : view === 'drawer' ? 'v-drawer' : 'v-screen';
     $$('.view').forEach(v => v.classList.toggle('active', v.id === target));
     $('#screenScroll').parentElement.scrollTop = 0;
+    // directional motion: forward pushes slide in from the right, back from the left
+    const stage = $('#stage');
+    if (stage) {
+      stage.classList.remove('nav-fwd', 'nav-back');
+      void stage.offsetWidth;                       // restart the animation
+      stage.classList.add(view === 'home' ? 'nav-back' : (push ? 'nav-fwd' : 'nav-back'));
+    }
     updateHelm();
   }
 
@@ -3336,34 +3343,54 @@
       <div class="af-note">${note}</div></div>`;
   }
 
+  // Multitasking: the foreground app keeps its live DOM while backgrounded, so
+  // reopening it RESUMES exactly where you left off (scroll, tab, a half-typed
+  // message). Only one app holds the live frame at a time (its views use global
+  // ids); opening a different app tears the previous one down. A real teardown
+  // (Close from recents) stops its camera/audio and releases sensors.
+  let _frameApp = null;
+  function teardownFrameDom() {
+    const view = _frameApp && APP_VIEWS[_frameApp];
+    if (view && view.close) { try { view.close(); } catch (e) {} }
+    $('#appframe').innerHTML = '';
+    _frameApp = null;
+  }
   function openAppFrame(app) {
+    const af = $('#appframe');
+    const resume = _frameApp === app.id && af.firstElementChild;   // same app still loaded
+    if (_frameApp && _frameApp !== app.id) teardownFrameDom();      // one live frame
+    if (!resume) {
+      _frameApp = app.id;
+      const view = APP_VIEWS[app.id];
+      af.innerHTML = `
+        <div class="af-app">
+          <div class="af-bar">
+            <button class="af-nav" id="afBack" aria-label="Back">${ic('back',18)}</button>
+            <span class="af-title"><span class="af-dot" style="background:${app.color}"></span>${esc(app.name)}</span>
+            <button class="af-nav" id="afHome" aria-label="Home">${ic('home',16)}</button>
+          </div>
+          <div class="af-view" id="afView">${view ? view.render(app) : placeholderView(app)}</div>
+        </div>`;
+      $('#afBack').onclick = () => back();
+      $('#afHome').onclick = () => goHome();
+      if (view && view.wire) { try { view.wire(app); } catch (e) {} }
+    }
     S.appOpen = app.id;
-    const view = APP_VIEWS[app.id];
-    $('#appframe').innerHTML = `
-      <div class="af-app">
-        <div class="af-bar">
-          <button class="af-nav" id="afBack" aria-label="Back">${ic('back',18)}</button>
-          <span class="af-title"><span class="af-dot" style="background:${app.color}"></span>${esc(app.name)}</span>
-          <button class="af-nav" id="afHome" aria-label="Home">${ic('home',16)}</button>
-        </div>
-        <div class="af-view" id="afView">${view ? view.render(app) : placeholderView(app)}</div>
-      </div>`;
-    $('#afBack').onclick = () => back();
-    $('#afHome').onclick = () => goHome();
-    if (view && view.wire) { try { view.wire(app); } catch (e) {} }
-    $('#appframe').classList.add('open');
-    if (typeof Aura !== 'undefined') Aura.stop();   // home is covered
+    af.classList.remove('closing');
+    af.classList.add('open');
+    requestAnimationFrame(() => af.classList.add('shown'));   // animate up + in
+    if (typeof Aura !== 'undefined') Aura.stop();             // home is covered
     updateHelm();
     updateInsight();   // margin now reflects THIS app's access, net, resources
   }
   function closeAppFrame(silent) {
-    // Backgrounding an app does NOT release its sensors — a running app can keep
-    // using mic/camera/location in the background. Sensors release only when the
-    // app is actually closed (recents), cut off, or its permission is revoked.
-    const id = S.appOpen, view = id && APP_VIEWS[id];
-    if (view && view.close) { try { view.close(); } catch (e) {} }
-    $('#appframe').classList.remove('open');
-    $('#appframe').innerHTML = '';   // tear down iframes / video cleanly
+    // Background (don't destroy): the frame hides but its DOM + state live on, so
+    // reopening resumes. Sensors keep running in the background (honest) —
+    // teardown only happens on a real Close (recents) or a permission cut-off.
+    const af = $('#appframe');
+    af.classList.remove('shown');
+    af.classList.add('closing');
+    setTimeout(() => { if (!S.appOpen) af.classList.remove('open', 'closing'); }, 200);
     S.appOpen = null;
     if (!silent && S.view === 'home') renderHome();
     updateHelm();
@@ -3832,6 +3859,22 @@
     window.addEventListener('mouseup', () => sy = null);
     pane.addEventListener('touchstart', e => startPull(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
     pane.addEventListener('touchmove', e => movePull(e.touches[0].clientY), { passive: true });
+
+    // Swipe up from the bottom edge → home. The button-free gesture that makes
+    // the whole thing feel like a phone. A mostly-vertical swipe of 70px+ that
+    // starts in the bottom strip goes home (works over any screen or app).
+    let gy = null, gx = null;
+    const gStart = (x, y) => { if (S.locked || S.controlOpen) return; if (y >= window.innerHeight - 48) { gx = x; gy = y; } };
+    const gMove = (x, y) => {
+      if (gy == null) return;
+      if (gy - y > 70) { const dx = Math.abs(x - gx); gy = null; if (dx < 100) goHome(); }
+    };
+    window.addEventListener('touchstart', e => gStart(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
+    window.addEventListener('touchmove', e => gMove(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
+    window.addEventListener('touchend', () => { gy = null; });
+    window.addEventListener('mousedown', e => gStart(e.clientX, e.clientY));
+    window.addEventListener('mousemove', e => { if (e.buttons) gMove(e.clientX, e.clientY); });
+    window.addEventListener('mouseup', () => { gy = null; });
     // tapping the pane also opens the matching panel (discoverable for mouse users)
     pane.addEventListener('click', e => {
       if (S.locked || S.appOpen || S.controlOpen) return;
@@ -3878,6 +3921,7 @@
         <button class="act" data-nav="__control">Quick settings ›</button></div>
       <div class="card">${items}</div>`;
     $('#controlBody').querySelectorAll('[data-kill]').forEach(b => b.onclick = () => {
+      if (b.dataset.kill === _frameApp) teardownFrameDom();   // real close → stop camera/audio, drop DOM
       Sov.closeApp(b.dataset.kill);
       const rn = Sov.running();
       if (rn.length) renderControlRecents(rn); else { closeControl(); if (S.view==='home') renderHome(); }

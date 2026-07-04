@@ -2304,3 +2304,17 @@ input  { font: inherit; }
   border-radius: 50%; background: var(--accent); }
 .cal-cell.sel .cal-dot { background: var(--text-0); }
 .cal-ev .cal-time { flex: 0 0 46px; font-family: var(--mono); font-size: 12px; color: var(--accent); }
+
+/* ── Motion: app open/close + directional screen transitions ─────────────── */
+#appframe { opacity: 0; transform: scale(.95) translateY(8px); transform-origin: center 62%;
+  transition: opacity .2s var(--ease), transform .22s var(--ease); }
+#appframe.open.shown { opacity: 1; transform: none; }
+#appframe.closing { opacity: 0; transform: scale(.97) translateY(6px); }
+#stage.nav-fwd .view.active { animation: navFwd .22s var(--ease); }
+#stage.nav-back .view.active { animation: navBack .22s var(--ease); }
+@keyframes navFwd { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
+@keyframes navBack { from { opacity: 0; transform: translateX(-18px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  #appframe { transition: none; }
+  #stage.nav-fwd .view.active, #stage.nav-back .view.active { animation: none; }
+}
