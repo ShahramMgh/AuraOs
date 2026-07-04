@@ -77,9 +77,13 @@ if [[ "$MODE" == "--kiosk" ]]; then
     exit 1
   fi
   if ! command -v cage >/dev/null; then
-    echo "cage not found. Install a compositor + web engine:" >&2
-    echo "  Ubuntu 22.04:  sudo apt install cage cog" >&2
-    echo "  Ubuntu 24.04+: sudo apt install cage epiphany-browser" >&2
+    echo "cage not found — the kiosk needs a Wayland compositor + a web engine." >&2
+    echo "  Ubuntu 24.04 / newer:  sudo apt install cage epiphany-browser" >&2
+    echo "  (or any Chromium:      sudo apt install cage chromium-browser)" >&2
+    echo "  Ubuntu 22.04 only:     sudo apt install cage cog   ('cog'/WPE was dropped after 22.04)" >&2
+    echo >&2
+    echo "Not testing Android windows? You don't need the kiosk at all — the agent" >&2
+    echo "is already serving LIVE. Just open $URL in your normal browser." >&2
     exit 1
   fi
   echo "Launching cage kiosk session…  (switch VT or kill to exit)"
