@@ -16,6 +16,7 @@
     pin: '',
     ctlTab: 'controls',   // which pull-down panel is showing: 'notifs' | 'controls'
     insTab: null,         // which insight-margin section is expanded (or null)
+    homeEdit: false,      // iOS/Android-style home edit mode (long-press to enter)
   };
 
   /* ======================================================================
@@ -217,7 +218,7 @@
 
     $('#v-home').innerHTML = `
       <div class="home2-aura" aria-hidden="true"></div>
-      <div class="home2-body">
+      <div class="home2-body ${S.homeEdit ? 'editing' : ''}">
         <section class="aura-hero">
           <canvas class="aura-canvas" id="auraCanvas" aria-label="Aura — your on-device companion"></canvas>
           <div class="aura-time" id="homeClock">${st.time}</div>
@@ -230,13 +231,20 @@
           `<section class="home-page"><div class="tile-grid" data-page="${pi}">${ps.map(homeTile).join('')}</div></section>`).join('')}</div>
         ${pages.length > 1 ? `<div class="page-dots" id="pageDots">${pages.map((_, pi) =>
           `<button class="pdot ${pi === 0 ? 'on' : ''}" data-pdot="${pi}" aria-label="Page ${pi + 1}"></button>`).join('')}</div>` : ''}
-        <button class="all-apps-btn" data-nav="drawer">${ic('grid',16)} All apps</button>
+        ${S.homeEdit
+          ? `<div class="home-edit-bar">
+               <button class="heb-btn" data-hedit="wallpaper">${ic('sun',15)}<span>Wallpaper</span></button>
+               <button class="heb-btn" data-hedit="addpage">${ic('grid',15)}<span>Add page</span></button>
+               <button class="heb-btn done" data-hedit="done">Done</button>
+             </div>`
+          : `<button class="all-apps-btn" data-nav="drawer">${ic('grid',16)} All apps</button>`}
         <div style="height:4px"></div>
       </div>`;
 
     bindHome();
     $$('#homePager .tile-grid').forEach(g => enableTileSort(g));
     wireHomePager();
+    wireHomeEdit();
     mountAura();
     maybeSuggest();   // the resident may gently offer a learned routine (async)
   }
@@ -271,9 +279,10 @@
 
   function homeTile(app) {
     const using = Sov.activeSensorsFor(app.id).length ? 'using' : '';
+    const del = S.homeEdit ? `<span class="tile-x" data-hdel="${app.id}" aria-label="Remove">${ic('x', 11)}</span>` : '';
     return `
       <button class="tile ${using}" data-launch="${app.id}" style="--col:${app.color}">
-        <span class="tile-ic"><span class="tile-dot"></span>${ic(app.glyph, 24)}</span>
+        ${del}<span class="tile-ic"><span class="tile-dot"></span>${ic(app.glyph, 24)}</span>
         <span class="tile-lbl">${esc(app.name)}</span>
       </button>`;
   }
@@ -287,6 +296,76 @@
     };
     $$('#pageDots [data-pdot]').forEach(d => d.onclick = () =>
       pager.scrollTo({ left: (+d.dataset.pdot) * pager.clientWidth, behavior: 'smooth' }));
+  }
+
+  // Home edit mode — iOS/Android-style. Long-press a tile (or the background)
+  // to enter; tiles jiggle, an × removes them, a toolbar adds pages / changes
+  // wallpaper. A quick horizontal move is a page-swipe (we suppress the launch
+  // click), so swipe and drag no longer fight.
+  function wireHomeEdit() {
+    const enter = () => { if (!S.homeEdit) { S.homeEdit = true; renderHome(); } };
+    $$('#homePager .tile').forEach(t => {
+      let sx = 0, sy = 0, moved = false, lp = null;
+      t.addEventListener('pointerdown', e => {
+        moved = false; sx = e.clientX; sy = e.clientY;
+        lp = setTimeout(() => { if (!moved) enter(); }, 480);
+      });
+      t.addEventListener('pointermove', e => {
+        if (!moved && Math.hypot(e.clientX - sx, e.clientY - sy) > 10) { moved = true; clearTimeout(lp); }
+      });
+      t.addEventListener('pointerup', () => clearTimeout(lp));
+      t.addEventListener('pointercancel', () => clearTimeout(lp));
+      t.addEventListener('click', e => { if (moved) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+    });
+    const pager = $('#homePager');
+    if (pager) {
+      let px = 0, py = 0, pmoved = false, plp = null;
+      pager.addEventListener('pointerdown', e => {
+        if (e.target.closest('.tile')) return;   // tiles own their long-press
+        pmoved = false; px = e.clientX; py = e.clientY;
+        plp = setTimeout(() => { if (!pmoved) enter(); }, 480);
+      });
+      pager.addEventListener('pointermove', e => {
+        if (Math.hypot(e.clientX - px, e.clientY - py) > 10) { pmoved = true; clearTimeout(plp); }
+      });
+      pager.addEventListener('pointerup', () => clearTimeout(plp));
+      pager.addEventListener('pointercancel', () => clearTimeout(plp));
+    }
+    if (!S.homeEdit) return;
+    $$('#v-home [data-hdel]').forEach(x => x.onclick = e => {
+      e.stopPropagation(); e.preventDefault();
+      const id = x.dataset.hdel;
+      PREF.set('homePages', homePagesIds().map(p => (p || []).filter(a => a !== id)));
+      renderHome();
+    });
+    $$('#v-home [data-hedit]').forEach(b => b.onclick = () => {
+      const a = b.dataset.hedit;
+      if (a === 'done') { S.homeEdit = false; renderHome(); }
+      else if (a === 'addpage') {
+        const pgs = homePagesIds().slice(); pgs.push([]); PREF.set('homePages', pgs);
+        renderHome();
+        setTimeout(() => { const pg = $('#homePager'); if (pg) pg.scrollTo({ left: (pgs.length - 1) * pg.clientWidth, behavior: 'smooth' }); }, 40);
+        toast('Page added', 'ok', 'check');
+      } else if (a === 'wallpaper') openWallpaperSheet();
+    });
+  }
+
+  function openWallpaperSheet() {
+    const wp = PREF.get('wallpaper', 'petrol');
+    const scrim = $('#promptScrim');
+    scrim.innerHTML = `<div class="prompt-card wp-sheet">
+      <div class="pc-title">Wallpaper</div>
+      <div class="wp-grid">${WALLPAPERS.map(w =>
+        `<button class="wp-sw ${w.id === wp ? 'on' : ''}" data-wp2="${w.id}" style="background:${w.css}">
+           <span class="wp-name">${w.name}</span>${w.id === wp ? `<span class="wp-chk">${ic('check',16)}</span>` : ''}</button>`).join('')}</div>
+      <button class="pbtn allow" data-wpclose style="margin-top:12px">Done</button>
+    </div>`;
+    scrim.classList.add('open');
+    scrim.querySelectorAll('[data-wp2]').forEach(b => b.onclick = () => { PREF.set('wallpaper', b.dataset.wp2); applyWallpaper(); openWallpaperSheet(); });
+    scrim.querySelector('[data-wpclose]').onclick = () => {
+      scrim.classList.remove('open');
+      setTimeout(() => { if (!scrim.classList.contains('open')) scrim.innerHTML = ''; }, 200);
+    };
   }
 
   const greetShort = t => {
@@ -323,6 +402,7 @@
     grid.querySelectorAll('.tile').forEach(tile => {
       tile.addEventListener('pointerdown', e => {
         if (e.button) return;
+        if (!S.homeEdit) return;   // drag-to-arrange only in edit mode; else swipe pages freely
         const start = { x: e.clientX, y: e.clientY }; let started = false;
         const move = ev => {
           const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
@@ -2940,6 +3020,7 @@
   function goHome() {
     S.history = [];
     closeControl();
+    if (S.homeEdit) S.homeEdit = false;   // the home button also finishes editing
     if (S.appOpen) closeAppFrame(true);
     go('home', { push: false });
   }
@@ -2984,6 +3065,7 @@
     appstore: 'appstore' };
 
   async function launch(id) {
+    if (S.homeEdit) return;          // in edit mode, taps rearrange — they don't launch
     const app = Sov.app(id);
     if (!app) return;
     if (BUILTIN_SCREEN[id]) return go(BUILTIN_SCREEN[id]);
