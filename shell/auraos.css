@@ -813,6 +813,9 @@ input  { font: inherit; }
 .tile-grid.sorting { touch-action: none; }
 .tile-grid.sorting .tile { cursor: grab; }
 .tile.dragging { z-index: 50; opacity: .96; cursor: grabbing; }
+/* the invisible placeholder that holds a dragged tile's grid slot — see
+   enableTileSort's beginDrag() for why the real tile never re-parents mid-drag */
+.tile-ghost { opacity: 0; pointer-events: none; }
 .tile.dragging .tile-ic {
   box-shadow: 0 20px 40px -14px rgba(0, 0, 0, .85),
               0 0 0 2px color-mix(in srgb, var(--col) 55%, transparent),

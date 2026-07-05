@@ -846,20 +846,32 @@
         if (e.button) return;
         const start = { x: e.clientX, y: e.clientY };
         let moved = false, started = false, raf = null, lastEv = null, lastEdge = 0, baseLeft = 0, baseTop = 0;
+        let ghost = null;   // an inert placeholder that holds the tile's slot while it's lifted out
 
         // A dragged tile is pulled OUT of the grid's layout flow (position:
         // fixed, viewport coordinates) the instant the drag begins, and
         // follows the pointer 1:1 in real screen pixels for as long as the
-        // drag lasts. That's what makes it free instead of "jumping between
-        // slots": reordering the DOM underneath (for the other tiles' FLIP
-        // animation) has zero effect on a fixed-position element's own
-        // rendered position, so the tile you're holding never snaps or
-        // recomputes against the grid — only your own finger moves it.
+        // drag lasts — that's what makes it free instead of "jumping between
+        // slots". Reordering happens on an invisible GHOST placeholder that
+        // takes the tile's spot in the grid, never on the tile itself: the
+        // tile is reparented to <body> exactly ONCE, before pointer capture
+        // is set, and never touched again until drop. Earlier this reordered
+        // the captured tile directly (insertBefore/appendChild on every
+        // hover) — reparenting an element mid-capture is what silently broke
+        // it: the browser stops delivering pointermove (or drops capture
+        // outright) the moment its ancestry changes, so the "drop" location
+        // never actually took — the tile just reverted to wherever it
+        // started, which read as "doesn't stay where I leave it".
         const beginDrag = () => {
           started = true;
           _dragNewPages = [];
           const r = tile.getBoundingClientRect();
           baseLeft = r.left; baseTop = r.top;
+          ghost = document.createElement('div');
+          ghost.className = 'tile tile-ghost';
+          ghost.style.width = r.width + 'px'; ghost.style.height = r.height + 'px';
+          tile.parentElement.insertBefore(ghost, tile);
+          document.body.appendChild(tile);
           tile.classList.add('dragging');
           Object.assign(tile.style, {
             position: 'fixed', left: baseLeft + 'px', top: baseTop + 'px',
@@ -881,7 +893,7 @@
           const pager = $('#homePager');
           if (pager) {
             const pr = pager.getBoundingClientRect(), now = Date.now();
-            const pages = $$('#homePager .tile-grid'), curIdx = pages.indexOf(tile.closest('.tile-grid'));
+            const pages = $$('#homePager .tile-grid'), curIdx = pages.indexOf(ghost.closest('.tile-grid'));
             if (now - lastEdge > 550) {
               if (ev.clientX > pr.right - 34) {
                 lastEdge = now;
@@ -894,20 +906,17 @@
               }
             }
           }
-          tile.style.pointerEvents = 'none';
+          // both the dragged tile (fixed, on top) and the ghost (invisible)
+          // are already excluded from hit-testing, so no pointerEvents dance needed here
           const under = document.elementFromPoint(ev.clientX, ev.clientY);
-          tile.style.pointerEvents = '';
           const overTile = under && under.closest('.tile');
           const overGrid = under && under.closest('.tile-grid');
-          // Reordering only ever touches the OTHER tiles' DOM position (FLIP-
-          // animated below) — the dragged tile is fixed/out-of-flow, so this
-          // never moves or resets it.
-          if (overTile && overTile !== tile) {                       // reorder / cross-page insert
+          if (overTile && overTile !== ghost) {                        // reorder / cross-page insert
             const g = overTile.parentElement, r = overTile.getBoundingClientRect();
             const after = ev.clientY > r.top + r.height / 2 || ev.clientX > r.left + r.width / 2;
-            flipReorder(g, () => g.insertBefore(tile, after ? overTile.nextSibling : overTile));
-          } else if (overGrid && overGrid !== tile.parentElement) {   // move to another page's empty area
-            flipReorder(overGrid, () => overGrid.appendChild(tile));
+            flipReorder(g, () => g.insertBefore(ghost, after ? overTile.nextSibling : overTile));
+          } else if (overGrid && overGrid !== ghost.parentElement) {   // move to another page's empty area
+            flipReorder(overGrid, () => overGrid.appendChild(ghost));
           }
         };
         // In edit mode a small move starts the drag immediately. Not yet in
@@ -935,10 +944,12 @@
           if (!started) return;
           tile.classList.remove('dragging');
           $$('#homePager .tile-grid').forEach(g => g.classList.remove('sorting'));
-          // Release the free-floating position and let the tile fall into
-          // its real flow slot — a mini FLIP so it flies there smoothly
-          // instead of teleporting from "under the finger" to "in the grid".
+          // Drop the real tile into the ghost's slot — the ONLY other
+          // reparent of the tile all drag long — then release the
+          // free-floating position and fly it there with a mini FLIP so it
+          // settles smoothly instead of teleporting.
           const before = tile.getBoundingClientRect();
+          ghost.replaceWith(tile);
           Object.assign(tile.style, { position: '', left: '', top: '', width: '', height: '', margin: '', zIndex: '' });
           const after = tile.getBoundingClientRect();
           tile.style.transition = 'none';
