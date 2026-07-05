@@ -1182,7 +1182,44 @@ input  { font: inherit; }
 }
 .lock-notifs .nt-body.locked { color: var(--text-3); }
 
-.lock-bottom { display: flex; flex-direction: column; align-items: center; }
+/* ---- passcode entry: a real, dismissible bottom sheet, iOS-style ----
+   Closed by default; a tap (or swipe) on "Swipe up to unlock" opens it, a
+   drag on the grip or a tap on the scrim closes it, and a correct code gets
+   a beat of green success before it slides away on its own. */
+.lock-wake {
+  margin-top: auto; margin-bottom: 10px;
+  display: inline-flex; flex-direction: column; align-items: center; gap: 3px;
+  color: var(--text-2); font-size: 12.5px;
+  animation: wakeBounce 2.2s ease-in-out infinite;
+}
+.lw-chev { transform: rotate(-90deg); opacity: .7; }
+@keyframes wakeBounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+.pin-scrim {
+  position: absolute; inset: 0; z-index: 1;
+  background: rgba(2, 5, 9, .35); opacity: 0; pointer-events: none;
+  transition: opacity .3s var(--ease);
+}
+.pin-scrim.show { opacity: 1; pointer-events: auto; }
+.pin-sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
+  display: flex; flex-direction: column; align-items: center;
+  padding: 10px 22px 34px;
+  border-radius: 28px 28px 0 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, 0) 30%),
+    rgba(9, 15, 23, .82);
+  border-top: 1px solid var(--line-hi);
+  box-shadow: 0 -20px 60px -20px rgba(0, 0, 0, .85), var(--edge);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4); backdrop-filter: blur(28px) saturate(1.4);
+  transform: translateY(100%);
+  transition: transform .38s var(--spring);
+}
+.pin-sheet.open { transform: translateY(0); }
+.pin-grip {
+  width: 36px; height: 5px; border-radius: 3px; background: var(--line-hi);
+  margin-bottom: 16px; cursor: grab; touch-action: none;
+}
+.pin-grip:active { cursor: grabbing; }
 .lock-dots { display: flex; gap: 15px; margin-bottom: 13px; }
 .lock-dots .ld { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--line-hi); transition: all .18s var(--ease); }
 .lock-dots .ld.f {
@@ -1192,6 +1229,11 @@ input  { font: inherit; }
   transform: scale(1.08);
 }
 .lock-dots.err .ld { border-color: var(--alert); animation: shake .4s; }
+.lock-dots.ok .ld.f {
+  background: radial-gradient(circle at 35% 30%, var(--green-hi), var(--ok) 70%);
+  border-color: var(--ok);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--ok) 70%, transparent);
+}
 @keyframes shake { 0%, 100% { transform: translateX(0) } 25% { transform: translateX(-6px) } 75% { transform: translateX(6px) } }
 .lock-hint {
   display: inline-flex; align-items: center; gap: 6px;

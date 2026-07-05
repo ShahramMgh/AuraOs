@@ -14,6 +14,7 @@
     appOpen: null,
     locked: true,
     pin: '',
+    pinSheetOpen: false,  // the iOS-style passcode sheet — closed until woken
     ctlTab: 'controls',   // which pull-down panel is showing: 'notifs' | 'controls'
     insTab: null,         // which insight-margin section is expanded (or null)
     homeEdit: false,      // iOS/Android-style home edit mode (long-press to enter)
@@ -660,6 +661,12 @@
     S.homeEdit = true;
     const body = $('#v-home .home2-body');
     if (body) body.classList.add('editing');
+    // These gate on S.homeEdit at call time and were wired once already
+    // (false) at the initial render — re-arm them now it's actually true.
+    // Missing this was the regression: the clock stopped dragging/resizing
+    // entirely once entering edit mode no longer did a full re-render.
+    wireClockDrag();
+    wireClockResize();
   }
 
   // The edit-mode chrome (delete ×, edit bar) is always in the DOM and always
@@ -4792,6 +4799,11 @@
   /* ======================================================================
      LOCK SCREEN
      ====================================================================== */
+  // The passcode pad is its own sheet, presented and dismissed like iOS's —
+  // it slides up over the lock screen on demand rather than sitting there
+  // permanently, and slides back down (not just vanishing) on cancel or a
+  // correct code. S.pinSheetOpen tracks it; renderLock() reapplies it across
+  // the ~2s status re-renders so an open sheet doesn't get silently dropped.
   function renderLock() {
     const st = Sov.get();
     const dots = [0, 1, 2, 3].map(i => `<span class="ld ${i < S.pin.length ? 'f' : ''}"></span>`).join('');
@@ -4811,7 +4823,12 @@
         <div class="lock-status">${ic('shieldChk',13)}<span>Encrypted &amp; sealed</span></div>
       </div>
       <div class="lock-mid">${lockNotifs}</div>
-      <div class="lock-bottom">
+      <button class="lock-wake" id="lockWake" aria-label="Enter passcode">
+        <span class="lw-chev">${ic('chev',16)}</span><span>Swipe up to unlock</span>
+      </button>
+      <div class="pin-scrim" id="pinScrim"></div>
+      <div class="pin-sheet" id="pinSheet">
+        <div class="pin-grip" id="pinGrip" aria-hidden="true"></div>
         <div class="lock-dots" id="lockDots">${dots}</div>
         <div class="lock-hint">${ic('lock',12)}<span>Enter passcode</span></div>
         <div class="keypad">
@@ -4822,6 +4839,45 @@
         </div>
       </div>`;
     $('#lock').querySelectorAll('[data-k]').forEach(b => b.onclick = () => onKey(b.dataset.k));
+    $('#lockWake').onclick = openPinSheet;
+    $('#pinScrim').onclick = closePinSheet;
+    // a drag on the grip also opens/closes it, like a real bottom sheet
+    wirePinGripDrag();
+    if (S.pinSheetOpen) {
+      $('#pinSheet').classList.add('open');
+      $('#pinScrim').classList.add('show');
+    }
+  }
+  function openPinSheet() {
+    S.pinSheetOpen = true;
+    $('#pinSheet').classList.add('open');
+    $('#pinScrim').classList.add('show');
+  }
+  function closePinSheet() {
+    S.pinSheetOpen = false;
+    S.pin = '';
+    $('#pinSheet').classList.remove('open');
+    $('#pinScrim').classList.remove('show');
+  }
+  function wirePinGripDrag() {
+    const grip = $('#pinGrip'), sheet = $('#pinSheet');
+    if (!grip || !sheet) return;
+    grip.onpointerdown = e => {
+      e.preventDefault();
+      try { grip.setPointerCapture(e.pointerId); } catch (_) {}
+      const sy = e.clientY, h = sheet.offsetHeight;
+      sheet.style.transition = 'none';
+      const move = ev => {
+        const dy = Math.max(0, ev.clientY - sy);   // only downward (closing) drags
+        sheet.style.transform = `translateY(${dy}px)`;
+      };
+      const up = ev => {
+        grip.onpointermove = grip.onpointerup = grip.onpointercancel = null;
+        sheet.style.transition = ''; sheet.style.transform = '';
+        if ((ev.clientY - sy) > h * 0.28) closePinSheet();   // dragged past ~a third → dismiss
+      };
+      grip.onpointermove = move; grip.onpointerup = up; grip.onpointercancel = up;
+    };
   }
   async function onKey(k) {
     if (k === 'clear') { S.pin = ''; return renderLock(); }
@@ -4831,8 +4887,10 @@
     renderLock();
     if (S.pin.length === 4) {
       const ok = await Sov.unlock(S.pin);
-      if (ok) unlockDevice();
-      else {
+      if (ok) {
+        const d = $('#lockDots'); if (d) d.classList.add('ok');   // a beat of green success before the sheet closes
+        setTimeout(() => { closePinSheet(); unlockDevice(); }, 260);
+      } else {
         const d = $('#lockDots'); d.classList.add('err');
         setTimeout(() => { S.pin = ''; renderLock(); }, 450);
       }
@@ -4840,6 +4898,7 @@
   }
   function unlockDevice() {
     S.locked = false;
+    S.pinSheetOpen = false;
     $('#lock').classList.add('hidden');
     if (typeof Aura !== 'undefined') Aura.start();   // wake the orb Aura
     goHome();

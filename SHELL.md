@@ -290,6 +290,13 @@ as real files under the state dir via `/api/notes`), and a real **Calculator**
 (hand-evaluated arithmetic — never `eval` — with `± % ÷ ×` and full physical-keyboard
 input). These render as full screens in the shell, not external windows.
 
+**The lock screen's passcode pad is its own dismissible sheet**, iOS-style, not
+a fixture bolted to the bottom of the screen: the clock, date and notifications
+have the screen to themselves until you tap "Swipe up to unlock," at which
+point the keypad slides up over a dimming scrim. A drag on its grip, or a tap
+on the scrim, slides it back down; a correct code gets a beat of green success
+before it dismisses itself and the device unlocks.
+
 **Notifications — a real system service.** A pull-down **notification shade** sits
 at the top of the Control Center: every entry names its **source app**, is
 individually dismissible or cleared in bulk, and shows an unseen **count** on the
