@@ -782,6 +782,20 @@ const Sov = (() => {
         if (mode === 'live') return post('/api/ai/suggest/feedback', { id, accept: !!accept }, 4000, 1);
         return SIMAI.suggestFeedback(id, accept);
       },
+      // A gentle home-layout proposal from learned routine + time of day. The
+      // shell sends the user's CURRENT focus + order so the Engine diffs against
+      // reality and never nags. Returns { proposal: {...} | null }. Applying an
+      // accepted layout is the shell's own job (into the user's layout store), so
+      // the user's choice always wins.
+      async homeProposal(focus, order) {
+        const qs = '?focus=' + encodeURIComponent(focus || '') +
+                   '&order=' + encodeURIComponent((order || []).join(','));
+        return (mode === 'live' && await getJSON('/api/ai/home/proposal' + qs)) || SIMAI.homeProposal(focus, order);
+      },
+      async homeFeedback(id, accept, applied) {
+        if (mode === 'live') return post('/api/ai/home/feedback', { id, accept: !!accept, applied }, 4000, 1);
+        return SIMAI.homeFeedback(id, accept, applied);
+      },
     },
   };
 
@@ -1171,6 +1185,43 @@ const Sov = (() => {
     },
     suggestFeedback(id, accept) {
       if (!accept) { const today = Math.floor(Date.now() / 1000 / 86400); simAI.dismissed.push({ id, day: today }); }
+      return { ok: true };
+    },
+    homeProposal(focus, order) {
+      if (!simAI.settings.enabled) return { proposal: null };
+      const d = new Date(), hour = d.getHours(), dow = (d.getDay() + 6) % 7;
+      const today = Math.floor(d.getTime() / 1000 / 86400), pid = 'home-' + today;
+      if (simAI.dismissed.some(x => x.day === today && x.id === pid)) return { proposal: null };
+      const dp = h => (h >= 5 && h < 11) ? 'morning' : (h < 14) ? 'midday' : (h < 18) ? 'afternoon' : (h < 23) ? 'evening' : 'night';
+      const part = dp(hour), curFocus = focus || '', curOrder = (order || []).filter(Boolean);
+      const ranked = [], seen = new Set();
+      this.routines().forEach(r => {
+        if (r.action !== 'open_app' || r.confidence < 0.5) return;
+        const app = String((r.args || {}).name || '').trim().toLowerCase();
+        if (!app || app === 'assistant' || seen.has(app) || dp(r.hour) !== part) return;
+        const wd = r.dows.length && r.dows.every(x => x < 5), we = r.dows.length && r.dows.every(x => x >= 5);
+        if ((wd && dow >= 5) || (we && dow < 5)) return;
+        seen.add(app); ranked.push([app, r]);
+      });
+      if (!ranked.length) return { proposal: null };
+      const f = ranked[0][0];
+      const featured = ranked.map(x => x[0]).filter(a => a !== f);
+      const order2 = featured.concat(curOrder.filter(a => a !== f && !featured.includes(a)));
+      if (f === curFocus && JSON.stringify(order2) === JSON.stringify(curOrder)) return { proposal: null };
+      const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+      const why = (app, r) => `You usually open ${cap(app)} around ${String(r.hour).padStart(2, '0')}:${String(r.min).padStart(2, '0')} — seen ${r.count} times over ${r.days} days.`;
+      const lead = ranked.slice(0, 2).map(x => cap(x[0])).join(' and ');
+      return { proposal: { id: pid, focus: f, order: order2, why: `Your ${part} usually starts with ${lead}.`,
+        confidence: ranked[0][1].confidence, changes: ranked.map(([app, r]) => ({ app, why: why(app, r) })) } };
+    },
+    homeFeedback(id, accept, applied) {
+      if (accept) {
+        const f = applied && applied.focus ? ` Home now opens on ${applied.focus}.` : '';
+        simLog('home', 'Applied a home layout suggestion', 'You accepted a home layout the resident proposed from your routine; you can rearrange any tile at any time.' + f);
+      } else {
+        simAI.dismissed.push({ id, day: Math.floor(Date.now() / 1000 / 86400) });
+        simLog('home', 'Dismissed a home layout suggestion', 'You dismissed a proposed home layout; it won\'t come back today.');
+      }
       return { ok: true };
     },
   };

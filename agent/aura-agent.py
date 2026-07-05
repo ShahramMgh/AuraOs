@@ -1282,6 +1282,17 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/ai/suggest":
             # the resident's own perception of "now" drives the suggestion
             return self._send(200, AI.suggest())
+        if p == "/api/ai/home/proposal":
+            # the shell passes its perceived now + the user's CURRENT home layout
+            # (focus + focus-excluded order); the Engine proposes only, diffing
+            # against what the user actually sees so it never nags.
+            q = parse_qs(urlsplit(self.path).query)
+            ctx = {}
+            if q.get("focus"):
+                ctx["focus"] = q["focus"][0]
+            if q.get("order"):
+                ctx["order"] = [a for a in q["order"][0].split(",") if a]
+            return self._send(200, AI.home_proposal(ctx))
         # ---- Android layer (Phase III — Waydroid) ----
         if p == "/api/android/status":
             return self._send(200, ANDROID.status())
@@ -1484,6 +1495,11 @@ class Handler(BaseHTTPRequestHandler):
         if p == "/api/ai/suggest/feedback":
             return self._send(200, AI.suggestion_feedback(
                 body.get("id", ""), bool(body.get("accept"))))
+        if p == "/api/ai/home/feedback":
+            # applying an accepted layout is the shell's job (into the user's own
+            # store); the Engine only logs it (P8) or snoozes a rejection.
+            return self._send(200, AI.home_feedback(
+                body.get("id", ""), bool(body.get("accept")), body.get("applied")))
 
         # ---- Android layer (Phase III — Waydroid) ----
         if p == "/api/android/launch":

@@ -2872,9 +2872,11 @@
     if (Date.now() - _lastSuggestAt < 12000) return;   // don't hammer on re-render
     _lastSuggestAt = Date.now();
     let res; try { res = await Sov.ai.suggest(); } catch (e) { return; }
-    if (!res || !res.suggestion || S.view !== 'home') return;
-    const sug = res.suggestion, step = sug.plan && sug.plan[0];
-    if (!step || !AI_ACTIONS[step.name]) return;
+    if (S.view !== 'home') return;
+    const sug = res && res.suggestion, step = sug && sug.plan && sug.plan[0];
+    // The action suggestion (time-sensitive, one-shot) owns the slot; only when
+    // there is none do we offer the calmer home-layout proposal — one card at a time.
+    if (!sug || !step || !AI_ACTIONS[step.name]) return maybeHomeProposal(slot);
     const spec = AI_ACTIONS[step.name];
     slot.innerHTML = `
       <div class="suggest-card" id="suggestCard">
@@ -2897,6 +2899,51 @@
     };
     card.querySelector('[data-sg-no]').onclick = () => {
       Sov.ai.suggestFeedback(sug.id, false);
+      card.classList.add('dismissed'); setTimeout(() => card.remove(), 220);
+    };
+  }
+
+  // ---- home-layout proposal (P13) ---------------------------------------
+  // From what the resident has learned about this part of the day, gently
+  // propose a home arrangement — which app leads and their order. A PROPOSAL
+  // only: accepting writes the user's OWN layout store (the same one a drag
+  // writes), so a later drag always overrides it (P10/P13). Every reason is
+  // shown in plain language (P8) and the choice is logged.
+  async function maybeHomeProposal(slot) {
+    slot = slot || $('#suggestSlot'); if (!slot) return;
+    // send the layout the user actually sees, so the Engine diffs against reality
+    const cur = homeLayout(), focus = cur.focus.id;
+    const order = homePagesIds().reduce((a, p) => a.concat(p || []), []).filter(id => id !== focus);
+    let res; try { res = await Sov.ai.homeProposal(focus, order); } catch (e) { return; }
+    if (!res || !res.proposal || S.view !== 'home') return;
+    const p = res.proposal;
+    const why = (p.changes || []).slice(0, 3).map(c =>
+      `<div class="sg-why">${ic('spark', 10)} ${esc(c.why)}</div>`).join('') || `<div class="sg-why">${esc(p.why || '')}</div>`;
+    slot.innerHTML = `
+      <div class="suggest-card" id="suggestCard">
+        <span class="sg-ic">${ic('grid', 20)}</span>
+        <div class="sg-text">
+          <div class="sg-eyebrow">${ic('spark', 11)} A gentle suggestion</div>
+          <div class="sg-title">${esc(p.why || 'Rearrange your home for now?')}</div>
+          ${why}
+        </div>
+        <div class="sg-acts">
+          <button class="sg-no" data-sg-no>Not now</button>
+          <button class="sg-yes" data-sg-yes>Rearrange</button>
+        </div>
+      </div>`;
+    const card = $('#suggestCard');
+    card.querySelector('[data-sg-yes]').onclick = () => {
+      // the user's own act, into the user's own store — a drag can still undo it
+      PREF.set('focus', p.focus);
+      PREF.set('homePages', [p.order || []]);
+      Sov.ai.homeFeedback(p.id, true, { focus: p.focus, order: p.order });
+      card.classList.add('accepted'); setTimeout(() => card.remove(), 180);
+      renderHome();
+      toast('Home rearranged — drag any tile to change it', 'ok', 'check');
+    };
+    card.querySelector('[data-sg-no]').onclick = () => {
+      Sov.ai.homeFeedback(p.id, false);
       card.classList.add('dismissed'); setTimeout(() => card.remove(), 220);
     };
   }

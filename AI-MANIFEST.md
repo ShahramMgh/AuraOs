@@ -226,9 +226,14 @@ If any answer is *no*, it is not ready, regardless of how capable it is.
   dir, **not yet encrypted in the Vault** (P11) — that hardening is roadmap M5
   (`blueprint/P3 §3.5.1`); and this loop is verified in sim + a local live run,
   **not yet on hardware**.
-- Still ahead: encrypting AI memory into the Vault + a Memory screen, an
-  AI-proposed home layout, real context-source wiring, and a configured cloud
-  provider for the opt-in path.
+- **AI-proposed home layout (P13):** from the same learned routines, the
+  resident may propose a home arrangement for the current part of the day — which
+  app leads and the order of the rest — as a dismissible card with a plain-language
+  reason per app (P8). It only ever *proposes*: accepting writes the user's own
+  layout store (so a later drag always wins, P10/P13) and the served
+  `home.config.json` is never rewritten; rejecting snoozes it for the day.
+- Still ahead: encrypting AI memory into the Vault + a Memory screen, real
+  context-source wiring, and a configured cloud provider for the opt-in path.
 - This document governs Phase II. It does not weaken Phase I; it inherits it.
   Where this manifest and a Phase I guarantee could ever conflict, **the
   stronger protection of the user wins.**

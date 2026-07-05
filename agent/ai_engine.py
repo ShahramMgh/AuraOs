@@ -464,6 +464,116 @@ class AIEngine:
                  "You dismissed a suggestion; it won't come back today.")
         return {"ok": True}
 
+    # ---- home layout proposal (P13) ---------------------------------------
+    # The resident may propose a home-screen layout — which apps are featured and
+    # in what order — from the routines it has learned for THIS part of the day.
+    # It is only ever a PROPOSAL (P2): the shell applies it, on the user's accept,
+    # into the user's OWN layout store, so a later drag always wins (P10/P13).
+    # Every proposal is explainable (P8); accept/reject are logged. No cloud, no
+    # ML — the same on-device routine math as suggestions.
+    @staticmethod
+    def _daypart(hour):
+        """The part of the day an hour falls in — the granularity a home layout
+        should follow (a whole morning, not a 20-minute window)."""
+        if 5 <= hour < 11:
+            return "morning"
+        if 11 <= hour < 14:
+            return "midday"
+        if 14 <= hour < 18:
+            return "afternoon"
+        if 18 <= hour < 23:
+            return "evening"
+        return "night"
+
+    def home_proposal(self, ctx=None):
+        """Propose a home layout (a `home.config.json`-shaped {focus, order}) from
+        learned routines for the current time of day. Returns {"proposal": {...}}
+        or {"proposal": None} when the AI is off, no confident routine fits now,
+        the proposal is snoozed, or it would change nothing. `ctx` carries the
+        user's perceived now (hour/dow) and CURRENT layout (focus + focus-excluded
+        order) so the proposal is diffed against reality and never nags."""
+        if not self.settings()["enabled"]:
+            return {"proposal": None}
+        ctx = ctx or {}
+        t = time.localtime()
+        hour = int(ctx.get("hour", t.tm_hour))
+        dow = int(ctx.get("dow", t.tm_wday))
+        part = self._daypart(hour)
+        pid = "home-%d" % (int(time.time()) // 86400)   # stable per day → dismiss-for-today
+        if pid in self._dismissed_today():
+            return {"proposal": None}
+
+        cur_focus = ctx.get("focus") or ""
+        cur_order = [a for a in (ctx.get("order") or []) if a]   # user's current, focus-excluded
+
+        # Rank the apps the user tends to open in THIS part of the day. Only
+        # open_app routines shape the launcher; the assistant is the ambient orb,
+        # never a featured tile (the shell hides its focus card anyway).
+        ranked, seen = [], set()
+        for r in self.routines():
+            if r["action"] != "open_app" or r["confidence"] < 0.5:
+                continue
+            app = str((r.get("args") or {}).get("name", "")).strip().lower()
+            if not app or app == "assistant" or app in seen:
+                continue
+            if self._daypart(r["hour"]) != part:
+                continue
+            dows = r["dows"]
+            if dows and all(d < 5 for d in dows) and dow >= 5:   # weekday habit, it's the weekend
+                continue
+            if dows and all(d >= 5 for d in dows) and dow < 5:   # weekend habit, it's a weekday
+                continue
+            seen.add(app)
+            ranked.append((app, r))
+        if not ranked:
+            return {"proposal": None}
+
+        # Proposed hero = the strongest routine app for now. Proposed order = the
+        # routine apps by confidence, then the rest of the user's own order kept
+        # untouched (carrying through anything we have no opinion on, incl.
+        # android:* ids). No app appears twice; the focus is excluded from grid.
+        focus = ranked[0][0]
+        featured = [app for app, _ in ranked if app != focus]
+        tail = [a for a in cur_order if a != focus and a not in featured]
+        order = featured + tail
+
+        if focus == cur_focus and order == cur_order:
+            return {"proposal": None}          # already how the user has it — don't nag
+
+        def _why(app, r):
+            return ("You usually open %s around %02d:%02d — seen %d times over %d days."
+                    % (app.title(), r["hour"], r["min"], r["count"], r["days"]))
+
+        lead = " and ".join(a.title() for a, _ in ranked[:2])
+        return {"proposal": {
+            "id": pid, "focus": focus, "order": order,
+            "why": "Your %s usually starts with %s." % (part, lead),
+            "confidence": ranked[0][1]["confidence"],
+            "changes": [{"app": app, "why": _why(app, r)} for app, r in ranked],
+        }}
+
+    def home_feedback(self, rid, accept, applied=None):
+        """Record the user's choice on a home-layout proposal. Accepting is the
+        user's OWN act — the shell has already written it into the user's layout
+        store; here we only log it (P8). Rejecting snoozes it for the day, like a
+        suggestion, so the resident doesn't nag. Calm by design."""
+        if accept:
+            detail = ""
+            if isinstance(applied, dict) and applied.get("focus"):
+                detail = " Home now opens on %s." % str(applied["focus"]).title()
+            self.log("home", "Applied a home layout suggestion",
+                     "You accepted a home layout the resident proposed from your "
+                     "routine; you can rearrange any tile at any time." + detail)
+            return {"ok": True}
+        today = int(time.time()) // 86400
+        d = self._load(self.f_dismiss, [])
+        d = [x for x in d if isinstance(x, dict) and x.get("day") == today]
+        d.append({"id": rid, "day": today})
+        self._save(self.f_dismiss, d[-200:])
+        self.log("home", "Dismissed a home layout suggestion",
+                 "You dismissed a proposed home layout; it won't come back today.")
+        return {"ok": True}
+
     # ---- backend (replaceable; Ollama first) ------------------------------
     def backend(self):
         s = self.settings()

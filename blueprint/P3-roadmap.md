@@ -94,12 +94,28 @@ Milestones in dependency order; each ships only when its success criteria pass.
       > Memory screen to search/edit/delete every entry (P11). Verify entries
       > survive reboot, are unreadable from a pulled SD card, and deletion is
       > real. Pass the conformance box "memory encrypted/local/deletable".
-- [ ] **3.5.2 Learning loop + suggestions** — AI Engine proposes
+- [x] **3.5.2 Learning loop + suggestions** — AI Engine proposes
       `home.config.json` changes from routine; user choice always wins.
       > **Prompt:** Let the AI Engine propose a `home.config.json` layout from
       > observed routine + time of day (P13). Verify proposals are suggestions
       > the user can accept/reject, that the user's own choice always overrides,
       > and every proposal is explainable (P8) and logged.
+      >
+      > **DONE (this session).** `ai_engine.home_proposal(ctx)` mines `open_app`
+      > routines for the current day-part, promotes the most-used app to focus,
+      > orders the rest, and diffs against the layout the shell passes in — so it
+      > only speaks when it would change something (P2). It is a *proposal*:
+      > accepting writes the user's OWN layout store (`PREF.homePages`/`focus`,
+      > the same one a drag writes), so a later drag always overrides it
+      > (P10/P13); the served `home.config.json` is never rewritten. Surfaced as a
+      > dismissible home card (`shell.js:maybeHomeProposal`) with a plain-language
+      > "why" per app (P8); accept/reject are logged and reject snoozes for the
+      > day. Endpoints `GET /api/ai/home/proposal` + `POST /api/ai/home/feedback`.
+      > Verified: `tests/smoke.py` proves a mined routine reshapes the layout,
+      > the reasons carry stats, an unknown app is carried through, reject snoozes,
+      > it's silent while AI is off, and the on-disk config is byte-for-byte
+      > unchanged after propose+accept+reject. **Honest limit:** verified in sim +
+      > a local live run, not yet on hardware.
 - [ ] **3.5.3 Context sources + cloud opt-in path** — per-source authorization
       wired for real; one cloud provider behind the ask-once consent UX.
       *Success for M5: every conformance-checklist box checks yes, live.*

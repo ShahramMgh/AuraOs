@@ -37,7 +37,57 @@ def free_port():
     s = socket.socket(); s.bind(("127.0.0.1", 0)); p = s.getsockname()[1]; s.close(); return p
 
 
+def test_engine_direct():
+    """Home-layout proposal (Manifest P13), positive path. A mined routine needs
+    episodes spanning >=2 days, which the live `/observe` (always stamped 'now')
+    can't create — so drive the Engine directly against a temp Vault with injected
+    multi-day episodes and assert the propose / promote / explain / snooze / off
+    behaviour. Proves the resident actually reshapes the layout from a habit."""
+    import importlib
+    sys.path.insert(0, os.path.join(ROOT, "agent"))
+    vault = importlib.import_module("vault")
+    ai_engine = importlib.import_module("ai_engine")
+    tmp = tempfile.mkdtemp(prefix="aura-smoke-eng-")
+    state = os.path.join(tmp, "state"); os.makedirs(state, exist_ok=True)
+    eng = ai_engine.AIEngine(state, vault=vault.Vault(root=os.path.join(tmp, "vault")))
+
+    now = int(time.time())
+
+    def ep(app, ts, hour, minute, dow):
+        return {"id": str(ts) + app + str(minute), "ts": ts, "hour": hour, "min": minute,
+                "dow": dow, "action": "open_app", "args": {"name": app},
+                "sig": "open_app|name=" + app, "source": "user"}
+    # a weekday-morning habit: Music (4×, 2 days) and Phone (3×, 2 days) around 08:00
+    eng._save(eng.f_eps, [
+        ep("music", now, 8, 30, 1), ep("music", now, 8, 34, 1),
+        ep("music", now - 86400, 8, 28, 0), ep("music", now - 86400, 8, 40, 0),
+        ep("phone", now, 8, 45, 1), ep("phone", now, 8, 42, 1), ep("phone", now - 86400, 8, 50, 0),
+    ])
+    ctx = {"hour": 8, "min": 30, "dow": 1, "focus": "assistant",
+           "order": ["android:org.example.app", "phone", "music", "messages"]}
+
+    # off by default: episodes present, but intelligence off → no proposal
+    check("engine: no proposal while AI is off", eng.home_proposal(ctx).get("proposal") is None)
+
+    eng.set_settings({"enabled": True})
+    prop = eng.home_proposal(ctx).get("proposal")
+    check("engine: proposes a layout from a mined morning routine", prop is not None)
+    if prop:
+        check("engine: promotes the most-used app to focus", prop.get("focus") == "music")
+        check("engine: every change is explainable with stats (P8)",
+              bool(prop.get("changes")) and all("seen" in c.get("why", "") and "days" in c.get("why", "")
+                                                 for c in prop["changes"]))
+        check("engine: unknown android app carried through, not dropped",
+              "android:org.example.app" in (prop.get("order") or []))
+        eng.home_feedback(prop["id"], False)   # reject → snoozed for the rest of today
+        check("engine: a rejected proposal is snoozed for the day",
+              eng.home_proposal(ctx).get("proposal") is None)
+
+
 def main():
+    test_engine_direct()
+    cfg_path = os.path.join(SHELL, "home.config.json")
+    home_cfg_before = open(cfg_path, "rb").read()   # the Engine must never rewrite this
     port = free_port()
     base = f"http://127.0.0.1:{port}"
     home = tempfile.mkdtemp(prefix="aura-smoke-home-")
@@ -162,6 +212,34 @@ def main():
         check("plaintext memory never hits the disk", secret.encode() not in blob)
         check("no plaintext ai_memory.json left in state dir",
               not os.path.exists(os.path.join(state, "ai_memory.json")))
+
+        # ---- AI home-layout proposal (Manifest P13) ----
+        # off by default: with intelligence off, the resident proposes nothing.
+        st, d = j("/api/ai/home/proposal", token)
+        check("home proposal off when AI is off", st == 200 and d.get("proposal") is None)
+        # turn intelligence on, then feed a few same-day launches: one day of data
+        # is deliberately not enough to mine a routine, so it stays conservative.
+        j("/api/ai/settings", token, "POST", {"enabled": True})
+        for _ in range(3):
+            j("/api/ai/observe", token, "POST", {"action": "open_app", "args": {"name": "music"}, "source": "user"})
+        st, d = j("/api/ai/home/proposal?focus=assistant&order=phone,music", token)
+        check("home proposal conservative on one day of data", st == 200 and d.get("proposal") is None)
+        # accepting/rejecting a proposal is explainable + logged (P8)
+        st, d = j("/api/ai/home/feedback", token, "POST", {"id": "home-x", "accept": True, "applied": {"focus": "music"}})
+        check("home accept acknowledged", d.get("ok") is True)
+        st, d = j("/api/ai/home/feedback", token, "POST", {"id": "home-x", "accept": False})
+        check("home reject acknowledged", d.get("ok") is True)
+        st, acts = j("/api/ai/activity", token)
+        home_acts = [(a.get("kind"), a.get("summary", "")) for a in (acts if isinstance(acts, list) else [])]
+        check("home accept logged (P8)", any(k == "home" and "Applied" in s for k, s in home_acts))
+        check("home reject logged (P8)", any(k == "home" and "Dismissed" in s for k, s in home_acts))
+        # USER AUTHORITY: the served home.config.json is never rewritten by the
+        # Engine — it only proposes; the user's own layout store is the authority.
+        st, served = j("/home.config.json", token)
+        check("served home.config.json stays the hand-authored default",
+              served.get("generatedBy") == "default" and served.get("updated") is None)
+        check("Engine never rewrote home.config.json on disk",
+              open(cfg_path, "rb").read() == home_cfg_before)
 
     finally:
         proc.terminate()
