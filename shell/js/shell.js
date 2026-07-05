@@ -205,6 +205,61 @@
   // just render whatever it holds. Tapping runs the shell's normal launch flow,
   // so permissions + the live ribbon are untouched. Full A–Z grid is in the drawer.
   let HOME_CFG = null;   // cached config, preloaded at boot
+  // Play the staggered entrance only when we arrive at home (via go('home')),
+  // not on the ~20s in-place state re-renders — otherwise the tiles would pop
+  // every refresh. Set true on navigation, consumed once per render.
+  let _animateHome = true;
+
+  // ---- home clock widget ---------------------------------------------------
+  // A choosable widget, Android-style: several visual styles + a position.
+  // Stored per-device in PREF (clockStyle / clockAlign); rendered here and
+  // patched in place on each tick (paintHomeClock) so animations don't restart.
+  const CLOCK_STYLES = [
+    { id: 'aura',    name: 'Aura',    sub: 'Soft & luminous' },
+    { id: 'stacked', name: 'Stacked', sub: 'Hours over minutes' },
+    { id: 'minimal', name: 'Minimal', sub: 'Quiet & thin' },
+    { id: 'mono',    name: 'Mono',    sub: 'Technical' },
+    { id: 'analog',  name: 'Analog',  sub: 'Classic face' },
+  ];
+  const clockStyle = () => { const s = PREF.get('clockStyle', 'aura'); return CLOCK_STYLES.some(c => c.id === s) ? s : 'aura'; };
+  const clockAlign = () => (PREF.get('clockAlign', 'center') === 'left' ? 'left' : 'center');
+
+  // The inner markup for a given style + time (also used for the Personalize preview).
+  function clockInner(style, time) {
+    const p = String(time || '').split(':'), hh = p[0] || '--', mm = p[1] || '--';
+    if (style === 'stacked') return `<span class="cl-hh">${hh}</span><span class="cl-mm">${mm}</span>`;
+    if (style === 'analog') {
+      const h = ((parseInt(hh, 10) % 12) + (parseInt(mm, 10) || 0) / 60) * 30, m = (parseInt(mm, 10) || 0) * 6;
+      return `<svg class="cl-face" viewBox="0 0 100 100" aria-hidden="true">
+          <circle class="cl-ring" cx="50" cy="50" r="46"/>
+          ${[0,1,2,3,4,5,6,7,8,9,10,11].map(i => `<line class="cl-tick" x1="50" y1="6" x2="50" y2="${i % 3 ? 10 : 13}" transform="rotate(${i * 30} 50 50)"/>`).join('')}
+          <line class="cl-h" x1="50" y1="53" x2="50" y2="28" transform="rotate(${h} 50 50)"/>
+          <line class="cl-m" x1="50" y1="55" x2="50" y2="15" transform="rotate(${m} 50 50)"/>
+          <circle class="cl-cap" cx="50" cy="50" r="3.4"/>
+        </svg>`;
+    }
+    return `<span class="cl-time">${time || '--:--'}</span>`;   // aura · minimal · mono
+  }
+  function clockWidgetHTML(st) {
+    const style = clockStyle();
+    return `<div id="homeClock" class="clockw cw-${style}" data-style="${style}">${clockInner(style, st.time)}</div>`;
+  }
+  // Patch the live clock without rebuilding it (keeps the sheen animation smooth).
+  function paintHomeClock(st) {
+    const el = $('#homeClock'); if (!el) return;
+    const style = el.dataset.style, p = String(st.time || '').split(':'), hh = p[0] || '--', mm = p[1] || '--';
+    if (style === 'stacked') {
+      const a = el.querySelector('.cl-hh'), b = el.querySelector('.cl-mm');
+      if (a) a.textContent = hh; if (b) b.textContent = mm;
+    } else if (style === 'analog') {
+      const h = ((parseInt(hh, 10) % 12) + (parseInt(mm, 10) || 0) / 60) * 30, m = (parseInt(mm, 10) || 0) * 6;
+      const hEl = el.querySelector('.cl-h'), mEl = el.querySelector('.cl-m');
+      if (hEl) hEl.setAttribute('transform', `rotate(${h} 50 50)`);
+      if (mEl) mEl.setAttribute('transform', `rotate(${m} 50 50)`);
+    } else {
+      const t = el.querySelector('.cl-time'); if (t) t.textContent = st.time;
+    }
+  }
 
   // A short, human tagline for the focus card per app (config may override with
   // focusTag). Keeps the hero card feeling like an invitation, not a shortcut.
@@ -273,6 +328,7 @@
   function renderHome() {
     const st = Sov.get();
     HOME_CFG = HOME_CFG || Sov._homeCfgSync();
+    const animate = _animateHome; _animateHome = false;   // entrance plays once per arrival
     const { cfg, focus, pages } = homeLayout();
     // The Aura *is* the assistant's presence, so a separate "assistant" focus
     // card would be redundant — show a focus card only for another suggested app.
@@ -280,9 +336,9 @@
 
     $('#v-home').innerHTML = `
       <div class="home2-aura" aria-hidden="true"></div>
-      <div class="home2-body ${S.homeEdit ? 'editing' : ''}">
-        <section class="aura-hero">
-          <div class="aura-time" id="homeClock">${st.time}</div>
+      <div class="home2-body ${S.homeEdit ? 'editing' : ''} ${animate ? 'anim' : ''}">
+        <section class="aura-hero align-${clockAlign()}">
+          ${clockWidgetHTML(st)}
           <div class="aura-date">${esc(st.date)} · ${esc(cfg.greeting || greetShort(st.time))}</div>
           <button class="aura-status" id="auraStatus" data-nav="permissions">${auraStatusHTML()}</button>
         </section>
@@ -299,8 +355,8 @@
                <button class="heb-btn" data-hedit="addpage">${ic('grid',15)}<span>Add page</span></button>
                <button class="heb-btn done" data-hedit="done">Done</button>
              </div>`
-          : `<button class="all-apps-btn" data-nav="drawer">${ic('grid',16)} All apps</button>`}
-        <div style="height:4px"></div>
+          : ''}
+        <div style="height:8px"></div>
       </div>`;
 
     bindHome();
@@ -342,15 +398,16 @@
       </button>`;
   }
 
-  function homeTile(app) {
+  function homeTile(app, i) {
     const using = Sov.activeSensorsFor(app.id).length ? 'using' : '';
     const del = S.homeEdit ? `<span class="tile-x" data-hdel="${app.id}" aria-label="Remove">${ic('x', 11)}</span>` : '';
     // Android apps show their own real icon when we can resolve it; else a glyph.
     const iconUrl = app.android && Sov.appIconUrl ? Sov.appIconUrl('waydroid.' + app.pkg) : null;
     const img = iconUrl ? `<img class="tile-img" src="${iconUrl}" onerror="this.remove()" alt="">` : '';
+    // --i drives the staggered entrance; --col tints the icon its own colour.
     return `
-      <button class="tile ${using}" data-launch="${app.id}" style="--col:${app.color}">
-        ${del}<span class="tile-ic"><span class="tile-dot"></span>${ic(app.glyph, 24)}${img}</span>
+      <button class="tile ${using}" data-launch="${app.id}" style="--col:${app.color};--i:${i || 0}">
+        ${del}<span class="tile-ic"><span class="tile-glow"></span><span class="tile-dot"></span>${ic(app.glyph, 24)}${img}</span>
         <span class="tile-lbl">${esc(app.name)}</span>
       </button>`;
   }
@@ -441,7 +498,13 @@
 
   const greetShort = t => {
     const h = parseInt(t.slice(0, 2), 10);
-    return h < 5 ? 'Late night' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+    const d = new Date().getDay();                          // 0 Sun … 6 Sat
+    const base = h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
+    if (h < 5) return 'Late night — rest well';
+    if (h < 12 && d === 1) return 'Fresh start to the week';   // Monday morning
+    if (h >= 17 && d === 5) return 'Happy Friday';             // Friday evening
+    if (d === 0 || d === 6) return base + ' · enjoy the weekend';
+    return base;
   };
 
   // Drag-to-rearrange the home tiles. A tap still launches (movement threshold
@@ -3027,6 +3090,19 @@
             <div class="rsub">Which edge the handle lives on</div></span>
           <div class="seg">${['left','right'].map(sd =>
             `<button class="${insSide === sd ? 'on acc' : ''}" data-insside="${sd}">${cap(sd)}</button>`).join('')}</div></div></div>
+      <div class="section-head"><span class="eyebrow">Home clock</span>
+        <span class="muted" style="font-size:11px">style &amp; position — like a widget</span></div>
+      <div class="clk-grid">${CLOCK_STYLES.map(c => `
+        <button class="clk-chip ${c.id === clockStyle() ? 'on' : ''}" data-clk="${c.id}">
+          <span class="clk-prev cw-${c.id}" aria-hidden="true">${clockInner(c.id, '9:41')}</span>
+          <span class="clk-name">${c.name}</span><span class="clk-sub">${c.sub}</span>
+          ${c.id === clockStyle() ? `<span class="wp-chk">${ic('check',14)}</span>` : ''}</button>`).join('')}</div>
+      <div class="card" style="margin-top:10px">
+        <div class="row"><span class="glyph">${ic('layers',18)}</span>
+          <span class="rtext"><div class="rtitle">Position</div><div class="rsub">Where the clock sits on home</div></span>
+          <div class="seg">${['center','left'].map(a =>
+            `<button class="${a === clockAlign() ? 'on acc' : ''}" data-clkalign="${a}">${cap(a)}</button>`).join('')}</div></div>
+      </div>
       <div class="section-head"><span class="eyebrow">Home focus</span></div>
       <div class="card">${focusRow}</div>
       <div class="section-head"><span class="eyebrow">Home pages</span>
@@ -3052,6 +3128,12 @@
     if (nl) nl.onclick = () => {
       PREF.set('nightlight', !PREF.get('nightlight', false)); applyEffects(); renderPersonalize();
     };
+    $('#screenScroll').querySelectorAll('[data-clk]').forEach(b => b.onclick = () => {
+      PREF.set('clockStyle', b.dataset.clk); renderPersonalize(); toast('Clock style set', 'ok', 'check');
+    });
+    $('#screenScroll').querySelectorAll('[data-clkalign]').forEach(b => b.onclick = () => {
+      PREF.set('clockAlign', b.dataset.clkalign); renderPersonalize();
+    });
     $('#screenScroll').querySelectorAll('[data-insside]').forEach(b => b.onclick = () => {
       PREF.set('insSide', b.dataset.insside); applyInsightSide(); updateInsight(); renderPersonalize();
     });
@@ -3383,7 +3465,7 @@
     else if (push && S.view !== view) S.history.push(S.view);
 
     S.view = view;
-    if (view === 'home')       renderHome();
+    if (view === 'home')       { _animateHome = true; renderHome(); }
     else if (view === 'drawer') renderDrawer('');
     else if (SCREENS[view])     SCREENS[view].render();
 
@@ -3956,24 +4038,28 @@
     const st = Sov.get();
     const dots = [0, 1, 2, 3].map(i => `<span class="ld ${i < S.pin.length ? 'f' : ''}"></span>`).join('');
     const key = (v, cls = '', extra = '') => `<button class="key ${cls}" ${extra}>${v}</button>`;
-    const notifs = Sov.notify.list().slice(0, 4);
+    const notifs = Sov.notify.list().slice(0, 5);
     const lockNotifs = notifs.length
-      ? `<div class="lock-notifs">${notifs.map(n => notifCardHTML(n, { locked: true })).join('')}</div>`
+      ? `<div class="lock-nhead">${notifs.length} notification${notifs.length > 1 ? 's' : ''}</div>
+         <div class="lock-notifs">${notifs.map(n => notifCardHTML(n, { locked: true })).join('')}</div>`
       : '';
     $('#lock').innerHTML = `
       <div class="home2-aura" aria-hidden="true"></div>
-      <div class="lock-clock">${st.time}</div>
-      <div class="lock-date">${esc(st.date)}</div>
-      <div class="lock-status">${ic('shieldChk',14)} Encrypted &amp; sealed</div>
-      ${lockNotifs}
-      <div class="lock-spacer"></div>
-      <div class="lock-hint">Enter PIN to unlock</div>
-      <div class="lock-dots" id="lockDots">${dots}</div>
-      <div class="keypad">
-        ${[1,2,3,4,5,6,7,8,9].map(n => key(n,'','data-k="'+n+'"')).join('')}
-        <button class="key fn" data-k="clear">Clear</button>
-        ${key(0,'','data-k="0"')}
-        <button class="key fn" data-k="back">⌫</button>
+      <div class="lock-top">
+        <div class="lock-clock">${st.time}</div>
+        <div class="lock-date">${esc(st.date)}</div>
+        <div class="lock-status">${ic('shieldChk',13)}<span>Encrypted &amp; sealed</span></div>
+      </div>
+      <div class="lock-mid">${lockNotifs}</div>
+      <div class="lock-bottom">
+        <div class="lock-dots" id="lockDots">${dots}</div>
+        <div class="lock-hint">${ic('lock',12)}<span>Enter passcode</span></div>
+        <div class="keypad">
+          ${[1,2,3,4,5,6,7,8,9].map(n => key(n,'','data-k="'+n+'"')).join('')}
+          <button class="key fn" data-k="clear">Clear</button>
+          ${key(0,'','data-k="0"')}
+          <button class="key fn" data-k="back">⌫</button>
+        </div>
       </div>`;
     $('#lock').querySelectorAll('[data-k]').forEach(b => b.onclick = () => onKey(b.dataset.k));
   }
@@ -4025,7 +4111,7 @@
     if (!S.locked && typeof Aura !== 'undefined') Aura.setSensors(activeSensorKinds());
     // refresh the honest surfaces if visible — patch in place, don't rebuild
     if (!S.locked && S.view === 'home' && !S.appOpen) {
-      const clk = $('#homeClock'); if (clk) clk.textContent = st.time;
+      paintHomeClock(st);
       const as = $('#auraStatus'); if (as) as.innerHTML = auraStatusHTML();
       bindHome();
       $$('#v-home [data-launch]').forEach(el =>
