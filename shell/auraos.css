@@ -600,15 +600,13 @@ input  { font: inherit; }
 .cw-words .cl-words::first-line { color: #fff; }
 .aura-hero.align-center .cw-words .cl-words { text-align: center; }
 /* Size — a continuous scale (drag the corner handle in edit mode, or a
-   Personalize preset), not a fixed "large" step. Grows without reflowing
-   the rest of home; a little extra top margin as it grows for breathing room. */
+   Personalize preset), not a fixed "large" step. */
 .clock-widget-wrap { position: relative; display: inline-block; }
-.clockw {
-  transform: scale(var(--clock-scale, 1));
-  margin-top: calc(var(--clock-dy, 0px) + (var(--clock-scale, 1) - 1) * 40px);
-}
-.aura-hero.align-left .clockw { transform-origin: left center; }
-.aura-hero.align-right .clockw { transform-origin: right center; }
+/* `zoom`, not `transform: scale` — scale is purely visual and reserves no
+   extra layout space, so a bigger clock would sit on top of whatever's below
+   it. zoom actually grows the box, so the date/status/widgets/tiles below
+   push down and reflow on their own — no manual spacing math needed. */
+.clockw { zoom: var(--clock-scale, 1); margin-top: var(--clock-dy, 0px); }
 .aura-hero.align-right { align-items: flex-end; text-align: right; padding-right: 6px; }
 .aura-hero.align-right .aura-status { align-self: flex-end; }
 .aura-hero.align-right .cw-stacked { align-items: flex-end; }
@@ -1200,18 +1198,23 @@ input  { font: inherit; }
   transition: opacity .3s var(--ease);
 }
 .pin-scrim.show { opacity: 1; pointer-events: auto; }
+/* A floating card, not an edge-to-edge sheet: #device's own frame has a big
+   (42px) corner radius for the desktop preview, and a sheet flush with its
+   square bottom corners against that curve got visibly clipped by the
+   frame's overflow:hidden. Margin on every side + full rounding clears it
+   regardless of frame radius or viewport size. */
 .pin-sheet {
-  position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
+  position: absolute; left: 14px; right: 14px; bottom: 14px; z-index: 2;
   display: flex; flex-direction: column; align-items: center;
-  padding: 10px 22px 34px;
-  border-radius: 28px 28px 0 0;
+  padding: 14px 18px 26px;
+  border-radius: 32px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, 0) 30%),
-    rgba(9, 15, 23, .82);
-  border-top: 1px solid var(--line-hi);
-  box-shadow: 0 -20px 60px -20px rgba(0, 0, 0, .85), var(--edge);
+    rgba(9, 15, 23, .86);
+  border: 1px solid var(--line-hi);
+  box-shadow: 0 30px 70px -20px rgba(0, 0, 0, .85), var(--edge);
   -webkit-backdrop-filter: blur(28px) saturate(1.4); backdrop-filter: blur(28px) saturate(1.4);
-  transform: translateY(100%);
+  transform: translateY(calc(100% + 28px));
   transition: transform .38s var(--spring);
 }
 .pin-sheet.open { transform: translateY(0); }

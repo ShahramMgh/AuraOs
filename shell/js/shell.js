@@ -845,12 +845,27 @@
       tile.addEventListener('pointerdown', e => {
         if (e.button) return;
         const start = { x: e.clientX, y: e.clientY };
-        let moved = false, started = false, raf = null, lastEv = null, lastEdge = 0;
+        let moved = false, started = false, raf = null, lastEv = null, lastEdge = 0, baseLeft = 0, baseTop = 0;
 
+        // A dragged tile is pulled OUT of the grid's layout flow (position:
+        // fixed, viewport coordinates) the instant the drag begins, and
+        // follows the pointer 1:1 in real screen pixels for as long as the
+        // drag lasts. That's what makes it free instead of "jumping between
+        // slots": reordering the DOM underneath (for the other tiles' FLIP
+        // animation) has zero effect on a fixed-position element's own
+        // rendered position, so the tile you're holding never snaps or
+        // recomputes against the grid — only your own finger moves it.
         const beginDrag = () => {
           started = true;
           _dragNewPages = [];
+          const r = tile.getBoundingClientRect();
+          baseLeft = r.left; baseTop = r.top;
           tile.classList.add('dragging');
+          Object.assign(tile.style, {
+            position: 'fixed', left: baseLeft + 'px', top: baseTop + 'px',
+            width: r.width + 'px', height: r.height + 'px', margin: '0',
+            zIndex: 999, transform: 'scale(1.08)',
+          });
           $$('#homePager .tile-grid').forEach(g => g.classList.add('sorting'));
           try { tile.setPointerCapture(e.pointerId); } catch (_) {}
         };
@@ -861,8 +876,8 @@
           raf = null;
           if (!lastEv || !started) return;
           const ev = lastEv;
-          const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
-          tile.style.transform = `translate(${dx}px,${dy}px) scale(1.08)`;
+          tile.style.left = (baseLeft + ev.clientX - start.x) + 'px';
+          tile.style.top = (baseTop + ev.clientY - start.y) + 'px';
           const pager = $('#homePager');
           if (pager) {
             const pr = pager.getBoundingClientRect(), now = Date.now();
@@ -884,14 +899,15 @@
           tile.style.pointerEvents = '';
           const overTile = under && under.closest('.tile');
           const overGrid = under && under.closest('.tile-grid');
+          // Reordering only ever touches the OTHER tiles' DOM position (FLIP-
+          // animated below) — the dragged tile is fixed/out-of-flow, so this
+          // never moves or resets it.
           if (overTile && overTile !== tile) {                       // reorder / cross-page insert
             const g = overTile.parentElement, r = overTile.getBoundingClientRect();
             const after = ev.clientY > r.top + r.height / 2 || ev.clientX > r.left + r.width / 2;
             flipReorder(g, () => g.insertBefore(tile, after ? overTile.nextSibling : overTile));
-            tile.style.transform = `translate(${dx}px,${dy}px) scale(1.08)`;
           } else if (overGrid && overGrid !== tile.parentElement) {   // move to another page's empty area
             flipReorder(overGrid, () => overGrid.appendChild(tile));
-            tile.style.transform = `translate(${dx}px,${dy}px) scale(1.08)`;
           }
         };
         // In edit mode a small move starts the drag immediately. Not yet in
@@ -919,9 +935,19 @@
           if (!started) return;
           tile.classList.remove('dragging');
           $$('#homePager .tile-grid').forEach(g => g.classList.remove('sorting'));
-          tile.style.transition = 'transform .18s var(--ease)';
-          tile.style.transform = '';
-          setTimeout(() => { tile.style.transition = ''; }, 200);
+          // Release the free-floating position and let the tile fall into
+          // its real flow slot — a mini FLIP so it flies there smoothly
+          // instead of teleporting from "under the finger" to "in the grid".
+          const before = tile.getBoundingClientRect();
+          Object.assign(tile.style, { position: '', left: '', top: '', width: '', height: '', margin: '', zIndex: '' });
+          const after = tile.getBoundingClientRect();
+          tile.style.transition = 'none';
+          tile.style.transform = `translate(${before.left - after.left}px,${before.top - after.top}px) scale(1.08)`;
+          requestAnimationFrame(() => {
+            tile.style.transition = 'transform .22s var(--spring)';
+            tile.style.transform = '';
+          });
+          setTimeout(() => { tile.style.transition = ''; }, 260);
           finalizeHomePagesAfterDrag();   // persists every page; drops an empty speculative one
           suppressClick = true; setTimeout(() => { suppressClick = false; }, 80);
         };
