@@ -39,6 +39,9 @@
     { id: 'ember',  name: 'Ember',  css: 'radial-gradient(100% 80% at 26% -2%, #2a1720 0%, #17131f 50%, #08070e 100%)' },
     { id: 'nebula', name: 'Nebula', css: 'radial-gradient(85% 72% at 82% 8%, #17224e 0%, #0c1330 45%, #060814 100%)' },
     { id: 'mono',   name: 'Mono',   css: 'radial-gradient(120% 90% at 50% 0%, #12161c 0%, #0a0d12 55%, #050709 100%)' },
+    { id: 'moss',   name: 'Moss',   css: 'radial-gradient(110% 80% at 30% -6%, #0e2620 0%, #08160f 52%, #04090a 100%)' },
+    { id: 'dawn',   name: 'Dawn',   css: 'radial-gradient(120% 85% at 50% -10%, #33202b 0%, #1a1420 48%, #0a0810 100%)' },
+    { id: 'abyss',  name: 'Abyss',  css: 'radial-gradient(90% 75% at 70% -5%, #0a1f38 0%, #071426 50%, #030710 100%)' },
   ];
   function applyWallpaper() {
     const img = PREF.get('wallpaperImg', null);
@@ -97,6 +100,8 @@
     { id: 'aurora', name: 'Aurora',    sub: 'Breathing pools of light' },
     { id: 'stars',  name: 'Starfield', sub: 'A quiet night sky' },
     { id: 'drift',  name: 'Drift',     sub: 'Slow color currents' },
+    { id: 'rain',   name: 'Rainfall',  sub: 'Streaks of falling light' },
+    { id: 'embers', name: 'Fireflies', sub: 'Drifting motes of light' },
     { id: 'off',    name: 'Minimal',   sub: 'No ambient layer' },
   ];
   const FX_LEVELS = [
@@ -107,6 +112,21 @@
     root.dataset.fx = PREF.get('fx', 'aurora');
     root.dataset.fxLevel = PREF.get('fxLevel', 'calm');
     $('#device').classList.toggle('nightlight', PREF.get('nightlight', false));
+  }
+
+  /* Icon pack — the shape language of app icons (home tiles, the focus card
+     and the drawer) plus whether labels sit under home tiles. Pure CSS
+     switches driven by data attributes; stored on-device like the rest. */
+  const TILE_SHAPES = [
+    { id: 'squircle', name: 'Squircle' },
+    { id: 'round',    name: 'Round' },
+    { id: 'sharp',    name: 'Sharp' },
+  ];
+  function applyIconStyle() {
+    const root = document.documentElement;
+    const s = PREF.get('tileShape', 'squircle');
+    root.dataset.tiles = TILE_SHAPES.some(t => t.id === s) ? s : 'squircle';
+    root.dataset.tileLabels = PREF.get('tileLabels', true) ? 'on' : 'off';
   }
 
   /* ---- top-level layout --------------------------------------------------- */
@@ -223,8 +243,11 @@
     { id: 'analog',  name: 'Analog',  sub: 'Classic face' },
   ];
   const clockStyle = () => { const s = PREF.get('clockStyle', 'aura'); return CLOCK_STYLES.some(c => c.id === s) ? s : 'aura'; };
-  const clockAlign = () => (PREF.get('clockAlign', 'center') === 'left' ? 'left' : 'center');
+  const clockAlign = () => { const a = PREF.get('clockAlign', 'center'); return a === 'left' || a === 'right' ? a : 'center'; };
   const clockSize  = () => (PREF.get('clockSize', 'regular') === 'large' ? 'large' : 'regular');
+  // Free placement: the clock may also sit lower on the page — a vertical
+  // offset in px, set by dragging the clock itself in home edit mode.
+  const clockY = () => Math.max(0, Math.min(200, Math.round(+PREF.get('clockY', 0) || 0)));
 
   // The time, spelled out (nearest five), for the "Words" style — calm and human.
   const _NUM = ['twelve', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven'];
@@ -276,6 +299,51 @@
     } else {
       const t = el.querySelector('.cl-time'); if (t) t.textContent = st.time;
     }
+  }
+
+  // ---- "Up next" home widget -----------------------------------------------
+  // The next real calendar event, from the same store the Calendar app uses
+  // (Sov.calendar → /api/calendar live, the SIM store offline). Real data only:
+  // when nothing is scheduled in the next week, the widget simply isn't there.
+  let _upnext = { at: 0, ev: null };
+  const _localISO = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  function nextEvent(events) {
+    const now = new Date(), today = _localISO(now);
+    const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const horizon = _localISO(new Date(now.getTime() + 7 * 864e5));
+    return (events || [])
+      .filter(e => e && e.date && e.date >= today && e.date <= horizon
+        && !(e.date === today && e.time && e.time < hhmm))   // today's past events are over
+      .sort((a, b) => ((a.date + (a.time || '99')) < (b.date + (b.time || '99')) ? -1 : 1))[0] || null;
+  }
+  function upNextWhen(ev) {
+    const today = _localISO(new Date()), tomorrow = _localISO(new Date(Date.now() + 864e5));
+    const day = ev.date === today ? 'Today' : ev.date === tomorrow ? 'Tomorrow'
+      : new Date(ev.date + 'T12:00:00').toLocaleDateString([], { weekday: 'short' });
+    return ev.time ? `${day} · ${ev.time}` : day;
+  }
+  async function paintUpNext() {
+    const slot = $('#upnextSlot'); if (!slot) return;
+    if (!PREF.get('upnext', true)) { slot.innerHTML = ''; return; }
+    if (Date.now() - _upnext.at > 60000) {   // fresh enough for a home widget, cheap on the agent
+      _upnext.at = Date.now();
+      try { _upnext.ev = nextEvent(await Sov.calendar.list()); } catch (e) { _upnext.ev = null; }
+    }
+    const ev = _upnext.ev;
+    const key = ev ? `${ev.id}|${ev.title}|${ev.date}|${ev.time}` : '';
+    if (slot.dataset.k === key) return;   // patch only on change, so ticks don't re-pop it
+    slot.dataset.k = key;
+    if (!ev) { slot.innerHTML = ''; return; }
+    slot.innerHTML = `
+      <button class="upnext" data-upnext>
+        <span class="un-ic">${ic('calendar', 18)}</span>
+        <span class="un-text"><span class="un-eyebrow">Up next</span><span class="un-title">${esc(ev.title || 'Event')}</span></span>
+        <span class="un-when">${esc(upNextWhen(ev))}</span>
+      </button>`;
+    slot.querySelector('[data-upnext]').onclick = () => {
+      _calSel = ev.date; _calYM = { y: +ev.date.slice(0, 4), m: +ev.date.slice(5, 7) - 1 };
+      go('calendar');
+    };
   }
 
   // A short, human tagline for the focus card per app (config may override with
@@ -354,12 +422,13 @@
     $('#v-home').innerHTML = `
       <div class="home2-aura" aria-hidden="true"></div>
       <div class="home2-body ${S.homeEdit ? 'editing' : ''} ${animate ? 'anim' : ''}">
-        <section class="aura-hero align-${clockAlign()} size-${clockSize()}">
+        <section class="aura-hero align-${clockAlign()} size-${clockSize()}" style="--clock-dy:${clockY()}px">
           ${clockWidgetHTML(st)}
           <div class="aura-date">${esc(st.date)} · ${esc(cfg.greeting || greetShort(st.time))}</div>
           <button class="aura-status" id="auraStatus" data-nav="permissions">${auraStatusHTML()}</button>
         </section>
         <div id="suggestSlot"></div>
+        ${S.homeEdit ? '' : `<div id="upnextSlot"></div>`}
         ${S.homeEdit ? '' : `<button class="home-search" id="homeSearch">${ic('search',16)}<span>Search apps, files, everything</span></button>`}
         ${showFocus ? focusCardHTML(focus, cfg) : ''}
         <div class="home-pager" id="homePager">${pages.map((ps, pi) =>
@@ -380,8 +449,10 @@
     $$('#homePager .tile-grid').forEach(g => enableTileSort(g));
     wireHomePager();
     wireHomeEdit();
+    wireClockDrag();
     const hs = $('#homeSearch'); if (hs) hs.onclick = () => openSearch();
     maybeSuggest();   // the resident may gently offer a learned routine (async)
+    paintUpNext();    // the next real calendar event, if any (async)
   }
 
   const activeSensorKinds = () => Object.keys(Sov.get().sensors);   // 'mic'|'cam'|'loc'
@@ -490,6 +561,30 @@
         toast('Page added', 'ok', 'check');
       } else if (a === 'wallpaper') openWallpaperSheet();
     });
+  }
+
+  // In edit mode the clock itself is a draggable widget: a vertical drag moves
+  // it down the page (stored as clockY), and where you let go horizontally
+  // snaps it to left / center / right. All device-local, like the tile layout.
+  function wireClockDrag() {
+    const el = $('#homeClock'); if (!el || !S.homeEdit) return;
+    el.onpointerdown = e => {
+      e.preventDefault(); e.stopPropagation();
+      try { el.setPointerCapture(e.pointerId); } catch (err) {}
+      const body = $('#v-home .home2-body'); if (!body) return;
+      const sx = e.clientX, sy = e.clientY, y0 = clockY();
+      const clampDy = dy => Math.max(-y0, Math.min(200 - y0, dy));
+      el.onpointermove = ev => { el.style.transform = `translate(${ev.clientX - sx}px, ${clampDy(ev.clientY - sy)}px)`; };
+      const up = ev => {
+        el.onpointermove = el.onpointerup = el.onpointercancel = null;
+        el.style.transform = '';
+        PREF.set('clockY', y0 + clampDy(ev.clientY - sy));
+        const br = body.getBoundingClientRect(), cx = ev.clientX - br.left;
+        PREF.set('clockAlign', cx < br.width / 3 ? 'left' : cx > (2 * br.width) / 3 ? 'right' : 'center');
+        renderHome();
+      };
+      el.onpointerup = up; el.onpointercancel = up;
+    };
   }
 
   function openWallpaperSheet() {
@@ -1816,9 +1911,9 @@
       const event = { id: ev && ev.id, title: ($('#evTitle').value || '').trim(), date: $('#evDate').value, time: $('#evTime').value, notes: ($('#evNotes').value || '').trim() };
       if (!event.title || !event.date) { toast('Title and date are required', 'alert', 'x'); return; }
       _calSel = event.date;
-      await Sov.calendar.op(ev ? 'update' : 'add', event); close(); renderCalendar();
+      await Sov.calendar.op(ev ? 'update' : 'add', event); _upnext.at = 0; close(); renderCalendar();
     };
-    const del = $('#evDel'); if (del) del.onclick = async () => { await Sov.calendar.op('delete', { id: ev.id }); close(); renderCalendar(); };
+    const del = $('#evDel'); if (del) del.onclick = async () => { await Sov.calendar.op('delete', { id: ev.id }); _upnext.at = 0; close(); renderCalendar(); };
   }
 
   /* ======================================================================
@@ -3116,13 +3211,33 @@
           ${c.id === clockStyle() ? `<span class="wp-chk">${ic('check',14)}</span>` : ''}</button>`).join('')}</div>
       <div class="card" style="margin-top:10px">
         <div class="row"><span class="glyph">${ic('layers',18)}</span>
-          <span class="rtext"><div class="rtitle">Position</div><div class="rsub">Where the clock sits on home</div></span>
-          <div class="seg">${['center','left'].map(a =>
+          <span class="rtext"><div class="rtitle">Position</div><div class="rsub">Or drag the clock itself while editing home</div></span>
+          <div class="seg">${['left','center','right'].map(a =>
             `<button class="${a === clockAlign() ? 'on acc' : ''}" data-clkalign="${a}">${cap(a)}</button>`).join('')}</div></div>
         <div class="row"><span class="glyph">${ic('sun',18)}</span>
           <span class="rtext"><div class="rtitle">Size</div><div class="rsub">How large it sits on home</div></span>
           <div class="seg">${['regular','large'].map(z =>
             `<button class="${z === clockSize() ? 'on acc' : ''}" data-clksize="${z}">${cap(z)}</button>`).join('')}</div></div>
+        ${clockY() ? `<button class="row tappable" data-clkreset style="width:100%;text-align:left"><span class="glyph">${ic('restart',18)}</span>
+          <span class="rtext"><div class="rtitle">Reset height</div><div class="rsub">The clock sits ${clockY()}px lower — put it back at the top</div></span></button>` : ''}
+      </div>
+      <div class="section-head"><span class="eyebrow">Home widgets</span>
+        <span class="muted" style="font-size:11px">real data, or nothing at all</span></div>
+      <div class="card">
+        <button class="row tappable" data-upnexttgl style="width:100%;text-align:left"><span class="glyph">${ic('calendar',18)}</span>
+          <span class="rtext"><div class="rtitle">Up next</div><div class="rsub">Your next calendar event on home — hidden when nothing is scheduled</div></span>
+          <span class="switch ${PREF.get('upnext', true) ? 'on' : ''}"></span></button>
+      </div>
+      <div class="section-head"><span class="eyebrow">Icons</span>
+        <span class="muted" style="font-size:11px">shape &amp; labels — home and drawer</span></div>
+      <div class="card">
+        <div class="row"><span class="glyph">${ic('grid',18)}</span>
+          <span class="rtext"><div class="rtitle">Shape</div><div class="rsub">How app icons are cut</div></span>
+          <div class="seg">${TILE_SHAPES.map(t =>
+            `<button class="${t.id === PREF.get('tileShape', 'squircle') ? 'on acc' : ''}" data-tileshape="${t.id}">${t.name}</button>`).join('')}</div></div>
+        <button class="row tappable" data-tilelbl style="width:100%;text-align:left"><span class="glyph">${ic('list',18)}</span>
+          <span class="rtext"><div class="rtitle">Labels</div><div class="rsub">App names under home tiles</div></span>
+          <span class="switch ${PREF.get('tileLabels', true) ? 'on' : ''}"></span></button>
       </div>
       <div class="section-head"><span class="eyebrow">Home focus</span></div>
       <div class="card">${focusRow}</div>
@@ -3158,6 +3273,15 @@
     $('#screenScroll').querySelectorAll('[data-clksize]').forEach(b => b.onclick = () => {
       PREF.set('clockSize', b.dataset.clksize); renderPersonalize();
     });
+    const ckr = $('#screenScroll').querySelector('[data-clkreset]');
+    if (ckr) ckr.onclick = () => { PREF.set('clockY', 0); renderPersonalize(); toast('Clock back at the top', 'ok', 'check'); };
+    const unx = $('#screenScroll').querySelector('[data-upnexttgl]');
+    if (unx) unx.onclick = () => { PREF.set('upnext', !PREF.get('upnext', true)); renderPersonalize(); };
+    $('#screenScroll').querySelectorAll('[data-tileshape]').forEach(b => b.onclick = () => {
+      PREF.set('tileShape', b.dataset.tileshape); applyIconStyle(); renderPersonalize();
+    });
+    const tlb = $('#screenScroll').querySelector('[data-tilelbl]');
+    if (tlb) tlb.onclick = () => { PREF.set('tileLabels', !PREF.get('tileLabels', true)); applyIconStyle(); renderPersonalize(); };
     $('#screenScroll').querySelectorAll('[data-insside]').forEach(b => b.onclick = () => {
       PREF.set('insSide', b.dataset.insside); applyInsightSide(); updateInsight(); renderPersonalize();
     });
@@ -4136,6 +4260,7 @@
     // refresh the honest surfaces if visible — patch in place, don't rebuild
     if (!S.locked && S.view === 'home' && !S.appOpen) {
       paintHomeClock(st);
+      paintUpNext();   // 60s-cached; only touches the DOM when the event changes
       const as = $('#auraStatus'); if (as) as.innerHTML = auraStatusHTML();
       bindHome();
       $$('#v-home [data-launch]').forEach(el =>
@@ -4382,6 +4507,7 @@
     applyWallpaper();
     applyTheme();
     applyEffects();
+    applyIconStyle();
     seedNotifications();
     Sov.notify.subscribe(onNotify);
     Sov.onUpdate(onUpdate);

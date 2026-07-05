@@ -83,13 +83,20 @@ app drawer ("All apps"). The only motion is a slow background aura, which honour
 `prefers-reduced-motion`.
 
 **Personalize** (Settings › Personalize) makes it yours, per-device and offline:
-a **wallpaper** picker (soft gradient presets), a **home focus** chooser (which
-app is the hero card), and **home pages** — assign each app to one of several
-swipeable pages (Android/iOS style) or take it off home. On the home screen you
-**swipe between pages** (dots track your position) and **drag tiles to rearrange
-them** — a tap still launches, a drag reorders (smooth FLIP) and it all persists. These
-are stored as device-local prefs (`localStorage`); when the AI Engine proposes a
-layout in Phase II, the user's own choice wins.
+a **wallpaper** picker (nine gradient presets, or any photo from `~/Pictures`),
+a **color theme**, **live effects** (aurora / starfield / drift / rainfall /
+fireflies / off, with a motion level), a **home clock widget** (six styles,
+two sizes — and free placement: drag the clock itself while editing home, or
+pick left/center/right here), **home widgets** (an **Up next** card showing the
+next real calendar event — hidden when nothing is scheduled, never faked), an
+**icon pack** (squircle / round / sharp shapes, labels on or off), a **home
+focus** chooser (which app is the hero card), and **home pages** — assign each
+app to one of several swipeable pages (Android/iOS style) or take it off home.
+On the home screen you **swipe between pages** (dots track your position) and
+**drag tiles to rearrange them** — a tap still launches, a drag reorders
+(smooth FLIP) and it all persists. These are stored as device-local prefs
+(`localStorage`); when the AI Engine proposes a layout in Phase II, the user's
+own choice wins.
 
 ---
 

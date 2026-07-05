@@ -588,6 +588,20 @@ input  { font: inherit; }
 /* Size — a bigger clock widget without reflowing the rest */
 .aura-hero.size-large .clockw { transform: scale(1.16); margin: 10px 0 18px; }
 .aura-hero.size-large.align-left .clockw { transform-origin: left center; }
+.aura-hero.size-large.align-right .clockw { transform-origin: right center; }
+/* Free placement — right alignment + a vertical offset (drag it in edit mode) */
+.aura-hero .clockw { margin-top: var(--clock-dy, 0px); }
+.aura-hero.size-large .clockw { margin-top: calc(10px + var(--clock-dy, 0px)); }
+.aura-hero.align-right { align-items: flex-end; text-align: right; padding-right: 6px; }
+.aura-hero.align-right .aura-status { align-self: flex-end; }
+.aura-hero.align-right .cw-stacked { align-items: flex-end; }
+.aura-hero.align-right .cw-words .cl-words { text-align: right; }
+/* in edit mode the clock reads as a draggable widget */
+.home2-body.editing .clockw {
+  cursor: grab; touch-action: none; border-radius: 14px;
+  outline: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 10px;
+}
+.home2-body.editing .clockw:active { cursor: grabbing; }
 
 /* Personalize — clock style picker */
 .clk-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
@@ -606,6 +620,22 @@ input  { font: inherit; }
 .clk-name { font-size: 13px; color: var(--text-0); font-weight: 600; }
 .clk-sub { font-size: 10.5px; color: var(--text-2); }
 .clk-chip .wp-chk { position: absolute; top: 9px; right: 10px; color: var(--accent); }
+
+/* ---- "Up next" widget: the next real calendar event, glass row ---- */
+.upnext {
+  width: 100%; display: flex; align-items: center; gap: 12px;
+  margin-top: 12px; padding: 11px 14px; border-radius: 16px; text-align: left;
+  background: rgba(255, 255, 255, .035); border: 1px solid rgba(255, 255, 255, .08);
+  box-shadow: var(--edge), 0 12px 26px -18px rgba(0, 0, 0, .8);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  transition: background .2s, transform .25s var(--spring);
+}
+.upnext:active { transform: scale(.98); background: rgba(255, 255, 255, .06); }
+.un-ic { flex: 0 0 auto; display: flex; color: color-mix(in srgb, var(--accent) 80%, #fff); }
+.un-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.un-eyebrow { font-family: var(--mono); font-size: 9.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--text-2); }
+.un-title { font-size: 13.5px; color: var(--text-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.un-when { flex: 0 0 auto; font-size: 12px; color: color-mix(in srgb, var(--accent) 70%, var(--text-1)); }
 
 /* focus card — the hero, tinted by the app's colour but mostly dark glass */
 .focus-card {
@@ -702,6 +732,7 @@ input  { font: inherit; }
    .tile-ic hover/press transforms untouched. */
 .home2-body.anim .aura-hero  { animation: heroIn .6s var(--ease) backwards; }
 .home2-body.anim #suggestSlot { animation: heroIn .55s var(--ease) backwards .04s; }
+.home2-body.anim #upnextSlot  { animation: heroIn .55s var(--ease) backwards .05s; }
 .home2-body.anim .focus-card  { animation: heroIn .6s var(--ease) backwards .06s; }
 .home2-body.anim:not(.editing) .tile {
   animation: tilePop .5s var(--spring) backwards;
@@ -749,7 +780,7 @@ input  { font: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .home2-aura::before, .home2-aura::after { animation: none; }
   .aura-time { animation: none; }
-  .home2-body.anim .aura-hero, .home2-body.anim #suggestSlot,
+  .home2-body.anim .aura-hero, .home2-body.anim #suggestSlot, .home2-body.anim #upnextSlot,
   .home2-body.anim .focus-card, .home2-body.anim:not(.editing) .tile { animation: none; }
   .tile-glow, .tile-ic { transition: none; }
 }
@@ -1912,6 +1943,58 @@ input  { font: inherit; }
   to   { transform: translate(5%, 4%) rotate(5deg); }
 }
 
+/* rainfall: two layers of thin falling streaks (elliptical gradients), the
+   near layer faster and brighter than the far one */
+:root[data-fx="rain"] .home2-aura::before {
+  left: 0; top: -260px; width: 100%; height: calc(100% + 260px);
+  border-radius: 0; filter: none; opacity: .5;
+  background:
+    radial-gradient(1.1px 22px at 42px 64px, rgba(170, 216, 246, .55), transparent 70%),
+    radial-gradient(1px 16px at 152px 148px, rgba(255, 255, 255, .32), transparent 70%),
+    radial-gradient(1.2px 26px at 234px 28px, rgba(140, 205, 240, .5), transparent 70%),
+    radial-gradient(1px 14px at 96px 214px, rgba(255, 255, 255, .26), transparent 70%);
+  background-size: 280px 260px;
+  animation: rainfall 1.9s linear infinite;
+}
+:root[data-fx="rain"] .home2-aura::after {
+  left: 0; top: -340px; width: 100%; height: calc(100% + 340px);
+  border-radius: 0; filter: none; opacity: .3;
+  background:
+    radial-gradient(1px 30px at 80px 90px, rgba(190, 226, 250, .5), transparent 70%),
+    radial-gradient(1px 20px at 210px 240px, rgba(255, 255, 255, .3), transparent 70%),
+    radial-gradient(1.1px 24px at 20px 300px, rgba(150, 210, 242, .4), transparent 70%);
+  background-size: 320px 340px;
+  animation: rainfallB 2.8s linear infinite;
+}
+/* the translate distance must equal the tile height for a seamless loop */
+@keyframes rainfall  { from { transform: translateY(0); } to { transform: translateY(260px); } }
+@keyframes rainfallB { from { transform: translateY(0); } to { transform: translateY(340px); } }
+
+/* fireflies: warm accent-tinted motes drifting slowly upward, twinkling */
+:root[data-fx="embers"] .home2-aura::before {
+  left: 0; top: 0; width: 100%; height: calc(100% + 340px);
+  border-radius: 0; filter: none; opacity: .8;
+  background:
+    radial-gradient(2.4px 2.4px at 62px 264px, color-mix(in srgb, var(--accent) 90%, #fff), transparent 60%),
+    radial-gradient(1.7px 1.7px at 186px 118px, rgba(255, 214, 140, .85), transparent 60%),
+    radial-gradient(2px 2px at 252px 306px, color-mix(in srgb, var(--accent) 65%, transparent), transparent 60%),
+    radial-gradient(1.4px 1.4px at 118px 38px, rgba(255, 235, 180, .6), transparent 60%);
+  background-size: 300px 340px;
+  animation: emberRise 22s linear infinite, twinkleA 4s ease-in-out infinite alternate;
+}
+:root[data-fx="embers"] .home2-aura::after {
+  left: 0; top: 0; width: 100%; height: calc(100% + 420px);
+  border-radius: 0; filter: none; opacity: .5;
+  background:
+    radial-gradient(1.8px 1.8px at 40px 380px, rgba(255, 224, 160, .8), transparent 60%),
+    radial-gradient(1.4px 1.4px at 220px 200px, color-mix(in srgb, var(--accent) 70%, #fff), transparent 60%),
+    radial-gradient(2.2px 2.2px at 150px 60px, rgba(255, 200, 120, .55), transparent 60%);
+  background-size: 260px 420px;
+  animation: emberRiseB 30s linear infinite, twinkleB 6s ease-in-out infinite alternate;
+}
+@keyframes emberRise  { from { transform: translateY(0); } to { transform: translateY(-340px); } }
+@keyframes emberRiseB { from { transform: translateY(0); } to { transform: translateY(-420px); } }
+
 /* motion level: still freezes, vivid brightens + quickens */
 :root[data-fx-level="still"] .home2-aura::before,
 :root[data-fx-level="still"] .home2-aura::after { animation: none; }
@@ -1922,6 +2005,10 @@ input  { font: inherit; }
 :root[data-fx-level="vivid"][data-fx="stars"] .home2-aura::before { animation-duration: 2.6s; }
 :root[data-fx-level="vivid"][data-fx="stars"] .home2-aura::after { animation-duration: 3.4s; }
 :root[data-fx-level="vivid"][data-fx="drift"] .home2-aura::before { animation-duration: 24s; opacity: .65; }
+:root[data-fx-level="vivid"][data-fx="rain"] .home2-aura::before { animation-duration: 1.2s; }
+:root[data-fx-level="vivid"][data-fx="rain"] .home2-aura::after { animation-duration: 1.8s; }
+:root[data-fx-level="vivid"][data-fx="embers"] .home2-aura::before { animation-duration: 13s; }
+:root[data-fx-level="vivid"][data-fx="embers"] .home2-aura::after { animation-duration: 18s; }
 
 @media (prefers-reduced-motion: reduce) {
   :root .home2-aura::before, :root .home2-aura::after { animation: none !important; }
@@ -1968,7 +2055,34 @@ input  { font: inherit; }
   background: linear-gradient(115deg,
     color-mix(in srgb, var(--accent) 22%, transparent), rgba(96, 84, 214, .18) 50%, rgba(27, 154, 168, .2));
 }
+.fx-prev[data-p="rain"] {
+  background:
+    radial-gradient(1px 14px at 20% 30%, rgba(170, 216, 246, .6), transparent 70%),
+    radial-gradient(1px 10px at 55% 65%, rgba(255, 255, 255, .35), transparent 70%),
+    radial-gradient(1px 16px at 85% 25%, rgba(140, 205, 240, .55), transparent 70%);
+}
+.fx-prev[data-p="embers"] {
+  background:
+    radial-gradient(2px 2px at 25% 70%, color-mix(in srgb, var(--accent) 85%, #fff), transparent 60%),
+    radial-gradient(1.6px 1.6px at 60% 35%, rgba(255, 214, 140, .8), transparent 60%),
+    radial-gradient(1.4px 1.4px at 85% 60%, rgba(255, 235, 180, .6), transparent 60%);
+  animation: twinkleA 3.4s ease-in-out infinite alternate;
+}
 .fx-prev[data-p="off"] { background: none; }
+
+/* ---- icon pack: shape language + labels (Personalize › Icons) ----
+   Driven by data attributes on :root (applyIconStyle in shell.js). The shape
+   applies wherever an app icon appears: home tiles, the focus card, drawer. */
+:root[data-tiles="round"] .tile-ic, :root[data-tiles="round"] .fc-ic,
+:root[data-tiles="round"] .app .app-ic, :root[data-tiles="round"] .dock .app .app-ic { border-radius: 50%; }
+:root[data-tiles="round"] .tile-glow { border-radius: 50%; }
+:root[data-tiles="sharp"] .tile-ic { border-radius: 10px; }
+:root[data-tiles="sharp"] .fc-ic, :root[data-tiles="sharp"] .app .app-ic,
+:root[data-tiles="sharp"] .dock .app .app-ic { border-radius: 9px; }
+:root[data-tiles="sharp"] .tile-glow { border-radius: 14px; }
+:root[data-tile-labels="off"] .tile-lbl { display: none; }
+:root[data-tile-labels="off"] .tile { gap: 0; }
+:root[data-tile-labels="off"] .tile-grid { gap: 24px 10px; }
 
 /* accent-highlighted segmented option (used by the Motion picker) */
 .seg.fxlvl { flex: 0 0 auto; }
