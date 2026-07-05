@@ -219,14 +219,29 @@
     { id: 'stacked', name: 'Stacked', sub: 'Hours over minutes' },
     { id: 'minimal', name: 'Minimal', sub: 'Quiet & thin' },
     { id: 'mono',    name: 'Mono',    sub: 'Technical' },
+    { id: 'words',   name: 'Words',   sub: 'Time, in words' },
     { id: 'analog',  name: 'Analog',  sub: 'Classic face' },
   ];
   const clockStyle = () => { const s = PREF.get('clockStyle', 'aura'); return CLOCK_STYLES.some(c => c.id === s) ? s : 'aura'; };
   const clockAlign = () => (PREF.get('clockAlign', 'center') === 'left' ? 'left' : 'center');
+  const clockSize  = () => (PREF.get('clockSize', 'regular') === 'large' ? 'large' : 'regular');
+
+  // The time, spelled out (nearest five), for the "Words" style — calm and human.
+  const _NUM = ['twelve', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven'];
+  const _MW = { 5: 'five', 10: 'ten', 15: 'a quarter', 20: 'twenty', 25: 'twenty-five', 30: 'half' };
+  function timeWords(time) {
+    const p = String(time || '').split(':');
+    let h = (parseInt(p[0], 10) || 0) % 12, r = Math.round((parseInt(p[1], 10) || 0) / 5) * 5;
+    if (r === 60) { r = 0; h = (h + 1) % 12; }
+    if (r === 0) return `${_NUM[h]} o'clock`;
+    if (r <= 30) return `${_MW[r]} past ${_NUM[h]}`;
+    return `${_MW[60 - r]} to ${_NUM[(h + 1) % 12]}`;
+  }
 
   // The inner markup for a given style + time (also used for the Personalize preview).
   function clockInner(style, time) {
     const p = String(time || '').split(':'), hh = p[0] || '--', mm = p[1] || '--';
+    if (style === 'words') return `<span class="cl-words">${timeWords(time)}</span>`;
     if (style === 'stacked') return `<span class="cl-hh">${hh}</span><span class="cl-mm">${mm}</span>`;
     if (style === 'analog') {
       const h = ((parseInt(hh, 10) % 12) + (parseInt(mm, 10) || 0) / 60) * 30, m = (parseInt(mm, 10) || 0) * 6;
@@ -248,7 +263,9 @@
   function paintHomeClock(st) {
     const el = $('#homeClock'); if (!el) return;
     const style = el.dataset.style, p = String(st.time || '').split(':'), hh = p[0] || '--', mm = p[1] || '--';
-    if (style === 'stacked') {
+    if (style === 'words') {
+      const w = el.querySelector('.cl-words'); if (w) w.textContent = timeWords(st.time);
+    } else if (style === 'stacked') {
       const a = el.querySelector('.cl-hh'), b = el.querySelector('.cl-mm');
       if (a) a.textContent = hh; if (b) b.textContent = mm;
     } else if (style === 'analog') {
@@ -337,7 +354,7 @@
     $('#v-home').innerHTML = `
       <div class="home2-aura" aria-hidden="true"></div>
       <div class="home2-body ${S.homeEdit ? 'editing' : ''} ${animate ? 'anim' : ''}">
-        <section class="aura-hero align-${clockAlign()}">
+        <section class="aura-hero align-${clockAlign()} size-${clockSize()}">
           ${clockWidgetHTML(st)}
           <div class="aura-date">${esc(st.date)} · ${esc(cfg.greeting || greetShort(st.time))}</div>
           <button class="aura-status" id="auraStatus" data-nav="permissions">${auraStatusHTML()}</button>
@@ -3102,6 +3119,10 @@
           <span class="rtext"><div class="rtitle">Position</div><div class="rsub">Where the clock sits on home</div></span>
           <div class="seg">${['center','left'].map(a =>
             `<button class="${a === clockAlign() ? 'on acc' : ''}" data-clkalign="${a}">${cap(a)}</button>`).join('')}</div></div>
+        <div class="row"><span class="glyph">${ic('sun',18)}</span>
+          <span class="rtext"><div class="rtitle">Size</div><div class="rsub">How large it sits on home</div></span>
+          <div class="seg">${['regular','large'].map(z =>
+            `<button class="${z === clockSize() ? 'on acc' : ''}" data-clksize="${z}">${cap(z)}</button>`).join('')}</div></div>
       </div>
       <div class="section-head"><span class="eyebrow">Home focus</span></div>
       <div class="card">${focusRow}</div>
@@ -3133,6 +3154,9 @@
     });
     $('#screenScroll').querySelectorAll('[data-clkalign]').forEach(b => b.onclick = () => {
       PREF.set('clockAlign', b.dataset.clkalign); renderPersonalize();
+    });
+    $('#screenScroll').querySelectorAll('[data-clksize]').forEach(b => b.onclick = () => {
+      PREF.set('clockSize', b.dataset.clksize); renderPersonalize();
     });
     $('#screenScroll').querySelectorAll('[data-insside]').forEach(b => b.onclick = () => {
       PREF.set('insSide', b.dataset.insside); applyInsightSide(); updateInsight(); renderPersonalize();
