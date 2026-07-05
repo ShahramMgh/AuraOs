@@ -1586,6 +1586,27 @@
       renderControl();
     });
     bindNav(body, () => closeControl());
+    wireTileLongPress(body);
+  }
+
+  // Long-press a quick-settings tile to jump straight to its full settings
+  // page (the classic iOS/Android shortcut) — a quick tap still just toggles.
+  const TGL_ROUTE = { wifi: 'sys-wifi', bluetooth: 'sys-bluetooth', vpn: 'settings',
+    dnd: 'settings', night: 'personalize', wwan: 'sys-wifi', airplane: 'sys-wifi' };
+  const GUARD_ROUTE = 'permissions';
+  function wireTileLongPress(body) {
+    body.querySelectorAll('[data-toggle], [data-guard]').forEach(b => {
+      const route = b.dataset.toggle ? TGL_ROUTE[b.dataset.toggle] : GUARD_ROUTE;
+      if (!route) return;
+      let lp = null, fired = false;
+      const start = () => { fired = false; lp = setTimeout(() => { fired = true; closeControl(); go(route); }, 480); };
+      const cancel = () => clearTimeout(lp);
+      b.addEventListener('pointerdown', start);
+      b.addEventListener('pointerup', cancel);
+      b.addEventListener('pointercancel', cancel);
+      b.addEventListener('pointermove', cancel);
+      b.addEventListener('click', e => { if (fired) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
+    });
   }
   const labelFor = k => ({ mic: 'microphone', cam: 'camera', loc: 'location' }[k]);
   const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
