@@ -235,6 +235,9 @@ A change is ready to merge only when **all** of these hold:
       visible when active, reversible/inspectable, degrades honestly.
 - [ ] If it adds/changes an `/api/` feature, the four places agree (§4): agent
       route (token-gated), `api.js` live **and** sim (same shape), shell view, doc.
+- [ ] The test suite passes: **`bash tests/run.sh`** (lint = py_compile + JS parse
+      + CSS/bash; auth; smoke = every endpoint's behaviour, CRUD persistence,
+      traversal guards, honest degrade). Add a check there for any new endpoint.
 - [ ] The agent still imports and compiles: `python3 -m py_compile agent/*.py`.
 - [ ] The shell still runs in a plain browser via SIM: `./try-shell.sh` — the new
       view is fully explorable with no agent.
