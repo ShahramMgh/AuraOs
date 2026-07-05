@@ -263,6 +263,20 @@ faithful TTY: a `user@host:path$` prompt, inline input in the scrollback, real
 command output and exit behavior (`bash: …: command not found`), history, and
 `clear` — it runs commands through the agent as the session user.
 
+**Live Terminal** (Personalize › Clock & widgets, off by default) is the first
+step toward bringing real desktop-style multitasking into the phone shell: a
+floating, draggable, resizable terminal window that sits **always on top of
+home**, independent of whatever else you're doing there — the rest of home
+keeps working normally underneath it (tap a tile, it still launches). It is
+**the same running session** as the full-screen Terminal app, not a copy —
+type a command in one, see it in the other, because it's one real shell, two
+windows onto it. Scope today is intentionally narrow: it shows on home only
+(it hides while an app is open, another screen is showing, or the device is
+locked, and reappears when you return) and there's one brick, not several.
+Full concurrent multi-app "live tiles" — several apps running visibly at once,
+each independently, anywhere — is the fuller vision this is a first step
+toward; see `DEVELOPMENT.md` §3.4.2 for that larger windowing milestone.
+
 **Native apps that open *inside* the shell.** Alongside Files, Terminal, Settings,
 System Monitor and the Assistant, the shell has its own **Clock** (live time,
 world clocks, **stopwatch** and a **countdown timer** that keeps running and rings

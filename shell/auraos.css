@@ -1225,6 +1225,59 @@ input  { font: inherit; }
   display: none; flex-direction: column;
 }
 #appframe.open { display: flex; }
+
+/* ============================================================================
+   LIVE TERMINAL BRICK — a real, running terminal that floats over home,
+   always on top, draggable and resizable (Personalize › Clock & widgets).
+   Confined to the same content band as #appframe so the pane/helm stay
+   reachable; pointer-events pass through everywhere except the window itself.
+   ============================================================================ */
+#liveTerm {
+  position: absolute; left: 0; right: 0;
+  top: var(--pane-h); bottom: var(--helm-h);
+  z-index: 50; pointer-events: none;
+}
+.lt-win {
+  position: absolute; pointer-events: auto;
+  min-width: 160px; min-height: 140px;
+  display: flex; flex-direction: column; overflow: hidden;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--s1) 88%, transparent);
+  border: 1px solid var(--line-hi);
+  box-shadow: var(--edge), 0 22px 50px -20px rgba(0, 0, 0, .85), 0 0 0 1px rgba(0, 0, 0, .3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3); backdrop-filter: blur(18px) saturate(1.3);
+  animation: ltIn .3s var(--spring) backwards;
+}
+@keyframes ltIn { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
+.lt-head {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  padding: 8px 6px 8px 12px; cursor: grab;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  border-bottom: 1px solid var(--line); touch-action: none;
+}
+.lt-head:active { cursor: grabbing; }
+.lt-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+.lt-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lt-x {
+  width: 22px; height: 22px; border-radius: 50%; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-2); background: rgba(255, 255, 255, .06);
+  transition: background .15s, color .15s;
+}
+.lt-x:active { background: rgba(255, 90, 90, .25); color: #fff; }
+.lt-term.term {
+  flex: 1 1 auto; height: auto; min-height: 0; border-radius: 0; border: none;
+  box-shadow: none; font-size: 11.5px; padding: 8px 10px; background: transparent;
+}
+.lt-in { font-size: 11.5px; }
+.lt-resize {
+  position: absolute; right: 2px; bottom: 2px; width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-3); cursor: nwse-resize; touch-action: none;
+  transform: rotate(45deg);
+}
 .appframe-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px; padding: 30px; text-align: center; }
 .appframe-body .af-badge {
   width: 68px; height: 68px; border-radius: 19px;

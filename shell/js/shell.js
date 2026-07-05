@@ -271,6 +271,7 @@
     </div>
     <div id="radial"></div>
     <div id="appframe"></div>
+    <div id="liveTerm"></div>
     <div id="recents"></div>
     <div id="insScrim"></div>
     <div id="insight" class="side-left hidden"></div>
@@ -580,6 +581,7 @@
     maybeSuggest();   // the resident may gently offer a learned routine (async)
     paintUpNext();    // the next real calendar event, if any (async)
     paintWeather();   // the live reading, if the user turned weather on
+    syncLiveTermBrick();
   }
 
   const activeSensorKinds = () => Object.keys(Sov.get().sensors);   // 'mic'|'cam'|'loc'
@@ -2507,7 +2509,10 @@
     `<span class="tp-c">:</span><span class="tp-path">${esc(cwdShort(cwd))}</span>` +
     `<span class="tp-c">$</span>&nbsp;</span>`;
 
-  function renderTerminal() {
+  // One real terminal SESSION lives in S (termLines/termCwd/termHist) — shared
+  // by the full-screen Terminal app and the live home brick below, so typing
+  // in either shows up in both: it's the same running shell, two windows onto it.
+  function ensureTermSession() {
     if (S.termLines === undefined) {
       const live = Sov.get().mode === 'live';
       S.termLines = [
@@ -2517,57 +2522,174 @@
       ];
     }
     if (!S.termCwd) S.termCwd = Sov.get().mode === 'live' ? '' : '/home/aura';
-    drawTerminal();
   }
-
-  function drawTerminal() {
-    const scroll = S.termLines.map(l => {
+  function termLinesHTML() {
+    return S.termLines.map(l => {
       if (l.t === 'cmd') return `<div class="tl">${promptHTML(l.cwd)}<span class="tl-cmd">${esc(l.v)}</span></div>`;
       if (l.t === 'sys') return `<div class="tl tl-sys">${esc(l.v)}</div>`;
       return `<div class="tl tl-out">${esc(l.v)}</div>`;
     }).join('');
-    const liveRow = S.termBusy
+  }
+  function termLiveRowHTML(inputClass) {
+    return S.termBusy
       ? `<div class="tl tl-busy">${esc(cwdShort(S.termCwd))} · running…</div>`
-      : `<div class="tl tl-live">${promptHTML(S.termCwd)}<input id="termIn" class="term-in"
+      : `<div class="tl tl-live">${promptHTML(S.termCwd)}<input class="term-in ${inputClass}"
            autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div>`;
-    $('#screenScroll').innerHTML = `
-      ${shead('System', 'Terminal')}
-      <div class="term" id="termBox">${scroll}${liveRow}</div>
-      <div style="height:8px"></div>`;
-    const box = $('#termBox');
-    box.onclick = () => { const i = $('#termIn'); if (i) i.focus(); };
-    // Focusing the inline input makes the browser scroll this (overflow-hidden)
-    // box horizontally to reveal the caret, pushing the prompt off-screen. Pin
-    // horizontal scroll to 0 so the prompt is always flush-left, like a real TTY.
-    box.onscroll = () => { if (box.scrollLeft !== 0) box.scrollLeft = 0; };
-    box.scrollTop = box.scrollHeight;
-    const inp = $('#termIn');
-    if (!inp) return;
-    setTimeout(() => { inp.focus(); box.scrollLeft = 0; box.scrollTop = box.scrollHeight; }, 30);
+  }
+  // Runs one command against the real shared session; redraw() repaints
+  // whichever window(s) should reflect it (the caller decides which).
+  async function termRunCommand(cmd, redraw) {
+    const h = S.termHist || (S.termHist = []);
+    S.termLines.push({ t: 'cmd', v: cmd, cwd: S.termCwd });
+    if (cmd.trim()) { h.push(cmd); S.termHistIdx = h.length; }
+    if (cmd.trim() === 'clear') { S.termLines = []; redraw(); return; }
+    if (!cmd.trim()) { redraw(); return; }   // bare Enter → fresh prompt
+    S.termBusy = true; redraw();
+    const r = await Sov.exec(cmd, S.termCwd);
+    S.termBusy = false;
+    if (r.out === '\x00clear') S.termLines = [];
+    else if (r.out !== undefined && r.out !== '') S.termLines.push({ t: 'out', v: r.out });
+    if (r.cwd) S.termCwd = r.cwd;
+    if (S.termLines.length > 300) S.termLines = S.termLines.slice(-300);
+    redraw();
+  }
+  // Wires history (↑/↓), Ctrl-L and Enter on a terminal input scoped to `box`
+  // (works for both the full-screen box and the home brick — no shared ids).
+  function wireTermInput(box, inp, onRedraw) {
+    box.onclick = () => inp.focus();
+    box.onscroll = () => { if (box.scrollLeft !== 0) box.scrollLeft = 0; };   // keep the prompt flush-left
     inp.onkeydown = async e => {
       e.stopPropagation();
       const h = S.termHist || (S.termHist = []);
       if (e.key === 'ArrowUp') { if (h.length) { S.termHistIdx = Math.max(0, (S.termHistIdx ?? h.length) - 1); inp.value = h[S.termHistIdx] || ''; moveCaretEnd(inp); } return; }
       if (e.key === 'ArrowDown') { S.termHistIdx = Math.min(h.length, (S.termHistIdx ?? h.length) + 1); inp.value = h[S.termHistIdx] || ''; return; }
-      if (e.key === 'l' && e.ctrlKey) { e.preventDefault(); S.termLines = []; drawTerminal(); return; }
+      if (e.key === 'l' && e.ctrlKey) { e.preventDefault(); S.termLines = []; onRedraw(); return; }
       if (e.key !== 'Enter') return;
-      const cmd = inp.value;
-      // echo the command into the scrollback exactly as a real shell would
-      S.termLines.push({ t: 'cmd', v: cmd, cwd: S.termCwd });
-      if (cmd.trim()) { h.push(cmd); S.termHistIdx = h.length; }
-      if (cmd.trim() === 'clear') { S.termLines = []; drawTerminal(); return; }
-      if (!cmd.trim()) { drawTerminal(); return; }   // bare Enter → fresh prompt
-      S.termBusy = true; drawTerminal();
-      const r = await Sov.exec(cmd, S.termCwd);
-      S.termBusy = false;
-      if (r.out === '\x00clear') S.termLines = [];
-      else if (r.out !== undefined && r.out !== '') S.termLines.push({ t: 'out', v: r.out });
-      if (r.cwd) S.termCwd = r.cwd;
-      if (S.termLines.length > 300) S.termLines = S.termLines.slice(-300);
-      if (S.view === 'terminal') drawTerminal();
+      await termRunCommand(inp.value, onRedraw);
     };
   }
   function moveCaretEnd(inp) { setTimeout(() => { const n = inp.value.length; try { inp.setSelectionRange(n, n); } catch (e) {} }, 0); }
+
+  function renderTerminal() {
+    ensureTermSession();
+    drawTerminal();
+  }
+  function drawTerminal() {
+    $('#screenScroll').innerHTML = `
+      ${shead('System', 'Terminal')}
+      <div class="term" id="termBox">${termLinesHTML()}${termLiveRowHTML('')}</div>
+      <div style="height:8px"></div>`;
+    const box = $('#termBox');
+    box.scrollTop = box.scrollHeight;
+    const inp = box.querySelector('.term-in');
+    if (!inp) return;
+    wireTermInput(box, inp, () => { if (S.view === 'terminal') drawTerminal(); });
+    setTimeout(() => { inp.focus(); box.scrollLeft = 0; box.scrollTop = box.scrollHeight; }, 30);
+  }
+
+  /* ---- Live Terminal brick — a real, running terminal that floats over home,
+     always on top, draggable and resizable, independent of whatever else is
+     on screen (Phase A of "live tiles" — see DEVELOPMENT.md 3.4.2 for the
+     fuller windowing vision this is the first step toward). Off by default;
+     it shares the exact same session as the full-screen Terminal app above —
+     type in one, see it in the other, because it's the same shell process,
+     not a copy. Home-only for now: it hides while an app is open, another
+     screen is showing, or the device is locked, and reappears on return. */
+  const liveTermOn = () => PREF.get('liveTerm', false);
+  // Stored as fractions of the home content area so it holds its relative
+  // spot across viewport sizes/orientations, like the clock's own placement.
+  const LT_DEFAULT_RECT = { xf: 0.56, yf: 0.05, wf: 0.4, hf: 0.32 };
+  const ltRect = () => Object.assign({}, LT_DEFAULT_RECT, PREF.get('liveTermRect', null) || {});
+  function ltShouldShow() {
+    return liveTermOn() && !S.locked && S.view === 'home' && !S.appOpen && !S.recentsOpen;
+  }
+  // Mount/unmount only — never re-renders content on its own, so a live poll
+  // (onUpdate ticks every ~2s) can never steal focus out from under typing.
+  function syncLiveTermBrick() {
+    const el = $('#liveTerm');
+    if (!ltShouldShow()) { if (el.firstElementChild) el.innerHTML = ''; return; }
+    if (el.firstElementChild) return;   // already mounted — leave it alone
+    ensureTermSession();
+    const r = ltRect();
+    el.innerHTML = `
+      <div class="lt-win" id="ltWin" style="left:${(r.xf*100).toFixed(2)}%;top:${(r.yf*100).toFixed(2)}%;width:${(r.wf*100).toFixed(2)}%;height:${(r.hf*100).toFixed(2)}%">
+        <header class="lt-head" id="ltGrip">
+          <span class="lt-dot" aria-hidden="true"></span>
+          <span class="lt-title">${ic('terminal',13)}<span>Terminal</span></span>
+          <button class="lt-x" id="ltClose" aria-label="Turn off Live Terminal">${ic('x',12)}</button>
+        </header>
+        <div class="term lt-term" id="ltBox">${termLinesHTML()}${termLiveRowHTML('lt-in')}</div>
+        <div class="lt-resize" id="ltResize" aria-hidden="true">${ic('chev',11)}</div>
+      </div>`;
+    wireLiveTermBrick();
+  }
+  function redrawLiveTermBrick() {
+    const box = $('#ltBox'); if (!box) return;
+    box.innerHTML = termLinesHTML() + termLiveRowHTML('lt-in');
+    box.scrollTop = box.scrollHeight;
+    const inp = box.querySelector('.term-in');
+    if (inp) { wireTermInput(box, inp, redrawLiveTermBrick); inp.focus(); }
+  }
+  function wireLiveTermBrick() {
+    const win = $('#ltWin'), box = $('#ltBox'), inp = box.querySelector('.term-in');
+    box.scrollTop = box.scrollHeight;
+    if (inp) wireTermInput(box, inp, redrawLiveTermBrick);
+    $('#ltClose').onclick = e => {
+      e.stopPropagation();
+      PREF.set('liveTerm', false);
+      syncLiveTermBrick();
+      toast('Live Terminal off — turn it back on in Personalize', '', 'terminal');
+    };
+    const bounds = () => $('#liveTerm').getBoundingClientRect();
+    // drag by the header
+    let dx = 0, dy = 0, startL = 0, startT = 0;
+    const dragMove = e => {
+      const b = bounds();
+      const nl = Math.max(0, Math.min(b.width - win.offsetWidth, startL + (e.clientX - dx)));
+      const nt = Math.max(0, Math.min(b.height - win.offsetHeight, startT + (e.clientY - dy)));
+      win.style.left = nl + 'px'; win.style.top = nt + 'px';
+    };
+    $('#ltGrip').onpointerdown = e => {
+      if (e.target.closest('#ltClose')) return;
+      e.preventDefault();
+      const b = bounds();
+      dx = e.clientX; dy = e.clientY; startL = win.offsetLeft; startT = win.offsetTop;
+      win.setPointerCapture(e.pointerId);
+      const up = () => {
+        win.removeEventListener('pointermove', dragMove);
+        win.removeEventListener('pointerup', up);
+        const bb = bounds();
+        PREF.set('liveTermRect', Object.assign(ltRect(), {
+          xf: win.offsetLeft / bb.width, yf: win.offsetTop / bb.height }));
+      };
+      win.addEventListener('pointermove', dragMove);
+      win.addEventListener('pointerup', up, { once: true });
+    };
+    // resize from the bottom-right corner handle
+    let rw = 0, rh = 0, sx = 0, sy = 0;
+    const resizeMove = e => {
+      const b = bounds();
+      const nw = Math.max(160, Math.min(b.width - win.offsetLeft, rw + (e.clientX - sx)));
+      const nh = Math.max(140, Math.min(b.height - win.offsetTop, rh + (e.clientY - sy)));
+      win.style.width = nw + 'px'; win.style.height = nh + 'px';
+    };
+    $('#ltResize').onpointerdown = e => {
+      e.preventDefault(); e.stopPropagation();
+      const b = bounds();
+      sx = e.clientX; sy = e.clientY; rw = win.offsetWidth; rh = win.offsetHeight;
+      win.setPointerCapture(e.pointerId);
+      const up = () => {
+        win.removeEventListener('pointermove', resizeMove);
+        win.removeEventListener('pointerup', up);
+        const bb = bounds();
+        PREF.set('liveTermRect', Object.assign(ltRect(), {
+          wf: win.offsetWidth / bb.width, hf: win.offsetHeight / bb.height }));
+        redrawLiveTermBrick();   // the box may now show more/less scrollback
+      };
+      win.addEventListener('pointermove', resizeMove);
+      win.addEventListener('pointerup', up, { once: true });
+    };
+  }
 
   /* ======================================================================
      FILES — a real file manager over the session user's own filesystem
@@ -3585,6 +3707,16 @@
           <span class="rtext"><div class="rtitle">Up next</div><div class="rsub">Your next calendar event on home — hidden when nothing is scheduled</div></span>
           <span class="switch ${PREF.get('upnext', true) ? 'on' : ''}"></span></button>
       </div>
+      <div class="section-head"><span class="eyebrow">Live Terminal</span>
+        <span class="muted" style="font-size:11px">a real, running shell — drag it, resize it</span></div>
+      <div class="card">
+        <button class="row tappable" data-livetermtgl style="width:100%;text-align:left"><span class="glyph">${ic('terminal',18)}</span>
+          <span class="rtext"><div class="rtitle">Floating terminal</div>
+            <div class="rsub">Always-on-top on home — the same session as the Terminal app, just a second window onto it</div></span>
+          <span class="switch ${liveTermOn() ? 'on' : ''}"></span></button>
+        ${PREF.get('liveTermRect', null) ? `<button class="row tappable" data-livetermreset style="width:100%;text-align:left"><span class="glyph">${ic('restart',18)}</span>
+          <span class="rtext"><div class="rtitle">Reset position &amp; size</div><div class="rsub">Put it back where it started</div></span></button>` : ''}
+      </div>
       <div style="height:8px"></div>`;
     $('#screenScroll').querySelectorAll('[data-clk]').forEach(b => b.onclick = () => {
       PREF.set('clockStyle', b.dataset.clk); renderPzClock(); toast('Clock style set', 'ok', 'check');
@@ -3599,6 +3731,16 @@
     if (ckr) ckr.onclick = () => { PREF.set('clockY', 0); renderPzClock(); toast('Clock back at the top', 'ok', 'check'); };
     const unx = $('#screenScroll').querySelector('[data-upnexttgl]');
     if (unx) unx.onclick = () => { PREF.set('upnext', !PREF.get('upnext', true)); renderPzClock(); };
+    const ltt = $('#screenScroll').querySelector('[data-livetermtgl]');
+    if (ltt) ltt.onclick = () => {
+      PREF.set('liveTerm', !liveTermOn());
+      if (S.view === 'home') syncLiveTermBrick();
+      renderPzClock();
+    };
+    const ltr = $('#screenScroll').querySelector('[data-livetermreset]');
+    if (ltr) ltr.onclick = () => {
+      PREF.set('liveTermRect', null); renderPzClock(); toast('Terminal position reset', 'ok', 'check');
+    };
   }
 
   // ---- Personalize › Icons ---------------------------------------------------
@@ -3992,6 +4134,7 @@
     // On home the pane + helm sit on the wallpaper, so (in the light menu
     // theme) they keep the night look there — this class is the hook.
     $('#device').classList.toggle('on-wallpaper', view === 'home');
+    if (view !== 'home') syncLiveTermBrick();   // home's own render already synced it
     $('#screenScroll').parentElement.scrollTop = 0;
     // directional motion: forward pushes slide in from the right, back from the left
     const stage = $('#stage');
@@ -4191,6 +4334,7 @@
     requestAnimationFrame(() => af.classList.add('shown'));   // animate up + in
     updateHelm();
     updateInsight();   // margin now reflects THIS app's access, net, resources
+    syncLiveTermBrick();
   }
   function closeAppFrame(silent) {
     // Background (don't destroy): the frame hides but its DOM + state live on, so
@@ -4759,9 +4903,11 @@
     const rc = $('#recents');
     rc.classList.add('open');
     requestAnimationFrame(() => rc.classList.add('shown'));
+    syncLiveTermBrick();
   }
   function closeRecents() {
     S.recentsOpen = false;
+    syncLiveTermBrick();
     const rc = $('#recents');
     rc.classList.remove('shown');
     setTimeout(() => { if (!S.recentsOpen) { rc.classList.remove('open'); rc.innerHTML = ''; } }, 220);
