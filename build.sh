@@ -159,7 +159,7 @@ AURA_APN="${AURA_APN:-}" AURA_APN_USER="${AURA_APN_USER:-}" AURA_APN_PASS="${AUR
   chroot "$ROOTFS" /bin/bash /aura/65-modem.sh
 
 log "STEP 7 — Native Intelligence Layer (Ollama + default light model)"
-AURA_AI_MODEL="${AURA_AI_MODEL:-llama3.2:1b}" \
+AURA_AI_MODEL="${AURA_AI_MODEL:-gemma4:e2b-it-qat}" \
   chroot "$ROOTFS" /bin/bash /aura/80-ai-engine.sh
 
 umount_chroot

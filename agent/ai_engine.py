@@ -36,9 +36,11 @@ from collections import Counter
 
 OLLAMA = "http://127.0.0.1:11434"
 
-# The light model shipped as the OS default — small enough for a Raspberry Pi 5
-# (~1.3 GB, instruction-tuned). Override per-request via settings.model.
-DEFAULT_MODEL = os.environ.get("AURA_AI_MODEL", "llama3.2:1b")
+# The model shipped as the OS default — Gemma 4 2B (edge, QAT 4-bit, ~4.3 GB),
+# capable enough for multi-step tool-use yet fitting an 8 GB Raspberry Pi 5
+# alongside the shell. Override at build/boot via AURA_AI_MODEL, or per-request
+# via settings.model.
+DEFAULT_MODEL = os.environ.get("AURA_AI_MODEL", "gemma4:e2b-it-qat")
 
 DEFAULT_SETTINGS = {
     "enabled": False,       # off by default — the device is fully usable without AI

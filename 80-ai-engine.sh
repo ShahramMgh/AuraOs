@@ -7,15 +7,17 @@
 # turns it on), and nothing is uploaded anywhere.
 #
 #   Runtime : Ollama (systemd service, listens on 127.0.0.1:11434 only)
-#   Model   : llama3.2:1b — ~1.3 GB, instruction-tuned, runs on a Pi 5
-#             pulled automatically on first boot when a network is available
+#   Model   : gemma4:e2b-it-qat — Gemma 4 2B (edge, QAT 4-bit), ~4.3 GB.
+#             Capable of multi-step tool-use yet fits an 8 GB Pi 5 alongside the
+#             shell; pulled on first boot when a network is available. (The 4B
+#             "e4b" needs ~8 GB resident and won't co-exist with the OS on a Pi.)
 #
-# Override the default model at build time:  AURA_AI_MODEL=qwen2.5:1.5b
+# Override the default model at build time:  AURA_AI_MODEL=gemma4:e4b-it-qat
 # Runs inside the arm64 chroot. Safe to re-run.
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
-MODEL="${AURA_AI_MODEL:-llama3.2:1b}"
+MODEL="${AURA_AI_MODEL:-gemma4:e2b-it-qat}"
 echo "── Native Intelligence Layer — runtime + default model (${MODEL}) ──"
 
 # ─── OLLAMA RUNTIME ──────────────────────────────────────────────────────────
