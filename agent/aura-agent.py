@@ -648,6 +648,57 @@ def wallpaper_daily():
     return dict(meta, available=True)
 
 
+WALLPAPER_DIR = os.path.join(STATE_DIR, "wallpapers")
+# A gallery pick names a Bing urlbase; accept ONLY that exact shape so the
+# image route can never be used as an open proxy.
+_WP_URLBASE = re.compile(r"^/th\?id=OHR\.[A-Za-z0-9_.\-]+$")
+
+
+def wallpaper_list():
+    """The most recent Bing images of the day (the archive serves up to 8),
+    so the user can pick one instead of accepting today's by default."""
+    j = http_json("https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=8&mkt=en-US")
+    imgs = j.get("images") if isinstance(j, dict) else None
+    if not imgs:
+        return {"available": False, "images": [],
+                "error": "The image service could not be reached."}
+    return {"available": True, "source": "Bing Image of the Day", "images": [
+        {"urlbase": i.get("urlbase") or "", "title": i.get("title") or "",
+         "copyright": i.get("copyright") or "", "date": i.get("startdate") or ""}
+        for i in imgs if i.get("urlbase")]}
+
+
+def wallpaper_fetch(urlbase, size):
+    """Download one archive image (validated urlbase) and cache it on disk;
+    returns the file path or None. Thumbs are small; full is portrait-first."""
+    if not _WP_URLBASE.match(urlbase or ""):
+        return None
+    try:
+        os.makedirs(WALLPAPER_DIR, exist_ok=True)
+    except Exception:
+        return None
+    sizes = ["_480x800.jpg", "_320x240.jpg"] if size == "thumb" else ["_1080x1920.jpg", "_1920x1080.jpg"]
+    safe = re.sub(r"[^A-Za-z0-9_.-]", "_", urlbase.split("OHR.", 1)[1])[:80]
+    path = os.path.join(WALLPAPER_DIR, f"{safe}{sizes[0]}")
+    if os.path.isfile(path):
+        return path
+    for suf in sizes:
+        try:
+            req = urllib.request.Request("https://www.bing.com" + urlbase + suf,
+                                         headers={"User-Agent": "AuraOS/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                data = r.read()
+            if data and len(data) > 1024:
+                tmp = path + ".tmp"
+                with open(tmp, "wb") as f:
+                    f.write(data)
+                os.replace(tmp, path)
+                return path
+        except Exception:
+            continue
+    return None
+
+
 # WMO weather interpretation codes → a short human label.
 WMO_LABEL = {
     0: "Clear sky", 1: "Mostly clear", 2: "Partly cloudy", 3: "Overcast",
@@ -1463,7 +1514,23 @@ class Handler(BaseHTTPRequestHandler):
         #      matching Personalize toggle is on — that toggle is the consent) ----
         if p == "/api/wallpaper/daily":
             return self._send(200, wallpaper_daily())
+        if p == "/api/wallpaper/list":
+            val = cached("wplist", 21600, wallpaper_list)
+            if not val.get("available"):
+                _CACHE.pop("wplist", None)   # a blip shouldn't stick for 6h
+            return self._send(200, val)
         if p == "/api/wallpaper/image":
+            q = parse_qs(urlsplit(self.path).query)
+            ub = q.get("id", [""])[0]
+            if ub:   # a gallery pick (validated urlbase), thumb or full
+                path = wallpaper_fetch(ub, q.get("sz", ["full"])[0])
+                if not path:
+                    return self._send(404, {"error": "image unavailable"})
+                try:
+                    with open(path, "rb") as f:
+                        return self._send(200, f.read(), "image/jpeg")
+                except Exception:
+                    return self._send(404, {"error": "read failed"})
             meta = wallpaper_daily()
             if not meta.get("available"):
                 return self._send(404, {"error": meta.get("error", "no image")})

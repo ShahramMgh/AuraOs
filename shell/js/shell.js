@@ -50,9 +50,16 @@
     // only because the user turned it on. On any failure we fall through to the
     // local choice — a plain reason shows in Personalize, never a blank screen.
     if (PREF.get('liveWallpaper', false)) {
-      _wpDaily = await Sov.wallpaperDaily();
-      const url = _wpDaily && _wpDaily.available && Sov.wallpaperImageUrl(_wpDaily.date);
-      if (url) return setWp(`center / cover no-repeat url("${url}")`);
+      const pick = PREF.get('liveWpPick', null);   // a pinned gallery pick beats the daily rotation
+      if (pick && pick.urlbase) {
+        const u = Sov.wallpaperImageUrlFor(pick.urlbase, 'full');
+        if (u) { _wpDaily = Object.assign({ available: true, pinned: true }, pick); return setWp(`center / cover no-repeat url("${u}")`); }
+        _wpDaily = { available: false, error: 'Live wallpaper needs the device agent.' };
+      } else {
+        _wpDaily = await Sov.wallpaperDaily();
+        const url = _wpDaily && _wpDaily.available && Sov.wallpaperImageUrl(_wpDaily.date);
+        if (url) return setWp(`center / cover no-repeat url("${url}")`);
+      }
     } else _wpDaily = null;
     const img = PREF.get('wallpaperImg', null);
     const url = img && Sov.photoUrl ? Sov.photoUrl(img) : null;
@@ -207,6 +214,27 @@
     root.dataset.fx = fx;
     root.dataset.fxLevel = PREF.get('fxLevel', 'calm');
     $('#device').classList.toggle('nightlight', PREF.get('nightlight', false));
+  }
+
+  /* Appearance — how the menus and surfaces are built (Personalize › Menus &
+     surfaces). Three device-local switches, all pure CSS via data attributes:
+     a light/dark token set for menus (home + lock keep the night language, so
+     their text stays on the wallpaper where it belongs), a glass level
+     (frosted / glass / solid) for how translucent surfaces are, and an
+     adjustable wallpaper-contrast scrim so content stays readable on a light
+     photo. */
+  const GLASS_MODES = [
+    { id: 'frosted', name: 'Frosted' },
+    { id: 'glass',   name: 'Glass' },
+    { id: 'solid',   name: 'Solid' },
+  ];
+  const wpScrim = () => Math.max(0, Math.min(70, Math.round(+PREF.get('wpScrim', 0) || 0)));
+  function applyAppearance() {
+    const root = document.documentElement;
+    root.dataset.ui = PREF.get('uiTheme', 'dark') === 'light' ? 'light' : 'dark';
+    const g = PREF.get('glass', 'glass');
+    root.dataset.glass = GLASS_MODES.some(x => x.id === g) ? g : 'glass';
+    root.style.setProperty('--wp-scrim', `rgba(2, 5, 9, ${(wpScrim() / 100).toFixed(2)})`);
   }
 
   /* Icon pack — the shape language of app icons (home tiles, the focus card
@@ -3222,6 +3250,54 @@
   }
 
   /* ======================================================================
+     LIVE WALLPAPER GALLERY — its own page: the recent Bing images of the
+     day. The first one is "Today" (auto-rotates daily, the default); picking
+     any other pins it until you change your mind. Images come through the
+     agent (/api/wallpaper/image), never straight from the shell.
+     ====================================================================== */
+  async function renderWpGallery() {
+    const id = 'wp-gallery';
+    $('#screenScroll').innerHTML = shead('Personalize', 'Live wallpaper') + loadingCard();
+    const r = await Sov.wallpaperList();
+    if (!stillOn(id)) return;
+    if (!r || !r.available) {
+      $('#screenScroll').innerHTML = shead('Personalize', 'Live wallpaper',
+        'The most recent Bing images of the day — pick one for home & lock.') + `
+        <div class="card"><div class="row"><span class="glyph">${ic('info',18)}</span>
+          <span class="rtext"><div class="rtitle">Gallery unavailable</div>
+          <div class="rsub">${esc((r && r.error) || 'The image service could not be reached.')}</div></span></div></div>`;
+      return;
+    }
+    const pick = PREF.get('liveWpPick', null);
+    const liveOn = PREF.get('liveWallpaper', false);
+    const day = d => d && d.length === 8
+      ? new Date(`${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6, 8)}T12:00:00`)
+          .toLocaleDateString([], { month: 'short', day: 'numeric' })
+      : '';
+    const isOn = (img, i) => liveOn && (pick ? pick.urlbase === img.urlbase : i === 0);
+    $('#screenScroll').innerHTML = shead('Personalize', 'Live wallpaper',
+      'The most recent Bing images of the day. “Today” follows the rotation; any other pick is pinned until you change it.') + `
+      <div class="wpg-grid">${r.images.map((img, i) => `
+        <button class="wpg-item ${isOn(img, i) ? 'on' : ''}" data-wpg="${i}">
+          <img loading="lazy" src="${Sov.wallpaperImageUrlFor(img.urlbase, 'thumb')}" alt="">
+          ${i === 0 ? `<span class="wl-daily">Today · auto</span>` : ''}
+          ${isOn(img, i) ? `<span class="wp-chk">${ic('check',14)}</span>` : ''}
+          <span class="wpg-lbl"><span class="wl-day">${esc(day(img.date))}</span>${esc(img.title || 'Untitled')}</span>
+        </button>`).join('')}</div>
+      <div class="pa-note" style="margin-top:10px">${esc(r.source || '')} · fetched by the agent, cached on-device</div>
+      <div style="height:8px"></div>`;
+    $$('#screenScroll [data-wpg]').forEach(b => b.onclick = async () => {
+      const img = r.images[+b.dataset.wpg];
+      PREF.set('liveWpPick', +b.dataset.wpg === 0 ? null
+        : { urlbase: img.urlbase, title: img.title, copyright: img.copyright, date: img.date });
+      PREF.set('liveWallpaper', true);   // choosing an image is choosing the feature
+      await applyWallpaper();
+      if (stillOn(id)) renderWpGallery();
+      toast(+b.dataset.wpg === 0 ? 'Following today’s image' : 'Wallpaper pinned', 'ok', 'check');
+    });
+  }
+
+  /* ======================================================================
      PERSONALIZE — wallpaper, home focus, and which apps sit on home
      ====================================================================== */
   function renderPersonalize() {
@@ -3289,6 +3365,30 @@
                   : esc(_wpDaily.error || 'Not available right now.')) : 'Fetching today’s image…')
               : 'One Bing photo a day, on home &amp; lock · uses the network, only while on'}</div></span>
           <span class="switch ${liveWp ? 'on' : ''}"></span></button>
+        <button class="row tappable" data-nav="wp-gallery" style="width:100%;text-align:left"><span class="glyph">${ic('photo',18)}</span>
+          <span class="rtext"><div class="rtitle">Gallery</div>
+            <div class="rsub">${(() => { const p = PREF.get('liveWpPick', null);
+              return p ? esc(`Pinned: ${p.title || 'an image'}`) : 'Browse the recent images · today’s is the default'; })()}</div></span>
+          <span class="chev">${ic('chev',16)}</span></button>
+      </div>
+      <div class="section-head"><span class="eyebrow">Menus &amp; surfaces</span>
+        <span class="muted" style="font-size:11px">legibility first — home &amp; lock keep the night look</span></div>
+      <div class="card">
+        <div class="row"><span class="glyph">${ic('sun',18)}</span>
+          <span class="rtext"><div class="rtitle">Menu theme</div><div class="rsub">Menus, settings &amp; apps</div></span>
+          <div class="seg">${['dark','light'].map(m =>
+            `<button class="${(PREF.get('uiTheme','dark')) === m ? 'on acc' : ''}" data-uitheme="${m}">${cap(m)}</button>`).join('')}</div></div>
+        <div class="row"><span class="glyph">${ic('layers',18)}</span>
+          <span class="rtext"><div class="rtitle">Surfaces</div><div class="rsub">How see-through cards &amp; panels are</div></span>
+          <div class="seg">${GLASS_MODES.map(g =>
+            `<button class="${(PREF.get('glass','glass')) === g.id ? 'on acc' : ''}" data-glassmode="${g.id}">${g.name}</button>`).join('')}</div></div>
+        <div class="slider-block" style="padding:12px 14px 14px">
+          <div class="rtitle" style="font-size:13.5px">Wallpaper contrast</div>
+          <div class="rsub" style="margin:2px 0 10px">A dark fill under home &amp; lock so text stays readable on a light image</div>
+          <div class="sb-row"><span class="sb-ic">${ic('sun',16)}</span>
+            <input type="range" min="0" max="70" value="${wpScrim()}" data-wpscrim>
+            <span class="mono" id="wpScrimVal" style="width:38px;text-align:right">${wpScrim()}%</span></div>
+        </div>
       </div>
       <div class="section-head"><span class="eyebrow">Weather</span>
         <span class="muted" style="font-size:11px">Open-Meteo · asks only while on</span></div>
@@ -3398,6 +3498,18 @@
     };
     const wxp = $('#screenScroll').querySelector('[data-wxplace]');
     if (wxp) wxp.onclick = () => openPlacePicker();
+    bindNav($('#screenScroll'));   // the Gallery row navigates (data-nav)
+    $('#screenScroll').querySelectorAll('[data-uitheme]').forEach(b => b.onclick = () => {
+      PREF.set('uiTheme', b.dataset.uitheme); applyAppearance(); renderPersonalize();
+    });
+    $('#screenScroll').querySelectorAll('[data-glassmode]').forEach(b => b.onclick = () => {
+      PREF.set('glass', b.dataset.glassmode); applyAppearance(); renderPersonalize();
+    });
+    const wps = $('#screenScroll').querySelector('[data-wpscrim]');
+    if (wps) wps.oninput = () => {
+      PREF.set('wpScrim', +wps.value); applyAppearance();
+      const v = $('#wpScrimVal'); if (v) v.textContent = `${wps.value}%`;
+    };
     $('#screenScroll').querySelectorAll('[data-th]').forEach(b => b.onclick = () => {
       PREF.set('theme', b.dataset.th); applyTheme(); renderPersonalize();
     });
@@ -3734,6 +3846,7 @@
     vault:         { render: renderVault },
     settings:      { render: renderSettings },
     personalize:    { render: renderPersonalize },
+    'wp-gallery':   { render: renderWpGallery },
     'sys-about':    { render: renderAbout },
     'sys-monitor':  { render: renderMonitor },
     'sys-storage':  { render: renderStorage },
@@ -4737,6 +4850,7 @@
     applyTheme();
     applyEffects();
     applyIconStyle();
+    applyAppearance();
     refreshWeather();   // no-op unless the user enabled Live weather
     // keep the reading current while enabled (refreshWeather itself is
     // 15-min-cached, so this costs nothing extra between refreshes)

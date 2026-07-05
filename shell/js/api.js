@@ -690,6 +690,19 @@ const Sov = (() => {
       if (mode !== 'live' || !TOKEN) return null;
       return AGENT + '/api/wallpaper/image?t=' + encodeURIComponent(TOKEN) + (d ? '&d=' + encodeURIComponent(d) : '');
     },
+    async wallpaperList() {
+      if (mode === 'live') {
+        const r = await getJSON('/api/wallpaper/list'); if (r) return r;
+        return { available: false, images: [], error: 'The agent did not answer.' };
+      }
+      return { available: false, sim: true, images: [],
+               error: 'The gallery needs the device agent — in simulation nothing leaves this page.' };
+    },
+    wallpaperImageUrlFor(urlbase, sz) {
+      if (mode !== 'live' || !TOKEN || !urlbase) return null;
+      return AGENT + '/api/wallpaper/image?id=' + encodeURIComponent(urlbase)
+        + '&sz=' + encodeURIComponent(sz || 'full') + '&t=' + encodeURIComponent(TOKEN);
+    },
     async weather(lat, lon) {
       if (mode === 'live') {
         const r = await getJSON(`/api/weather?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`);

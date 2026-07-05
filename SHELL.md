@@ -96,7 +96,13 @@ its footer, so the switcher tells the same honest story as the Aura.
 **Personalize** (Settings › Personalize) makes it yours, per-device and offline:
 a **wallpaper** picker (nine gradient presets, or any photo from `~/Pictures`),
 a **color theme**, **live effects** (aurora / starfield / drift / rainfall /
-fireflies / match-the-sky / off, with a motion level), a **home clock widget** (six styles,
+fireflies / match-the-sky / off, with a motion level), **menus &amp; surfaces**
+(a **light/dark menu theme** — home, lock and recents keep the night look so
+their text stays right on the wallpaper; a **surface glass level**: frosted /
+glass / solid, solid being fully opaque for maximum legibility; and an
+adjustable **wallpaper-contrast** fill, 0–70% dark, layered between the
+wallpaper and the content of home &amp; lock so text and icons stay visible on a
+light image), a **home clock widget** (six styles,
 two sizes — and free placement: drag the clock itself while editing home, or
 pick left/center/right here), **home widgets** (an **Up next** card showing the
 next real calendar event — hidden when nothing is scheduled, never faked), an
@@ -115,7 +121,11 @@ consent, and all egress goes through the agent, never straight from the shell):
 day — the agent caches it on disk (`/api/wallpaper/daily` meta +
 `/api/wallpaper/image` bytes) and it dresses home *and* the lock screen; the
 request carries no parameters at all, and Personalize shows the image's title
-and attribution. **Live weather** shows current conditions on home and lock
+and attribution. A **gallery page** (Personalize › Wallpaper › Gallery) lists
+the recent images of the day (`/api/wallpaper/list`, thumbnails proxied and
+cached by the agent; the image route accepts only strictly-validated Bing ids,
+never arbitrary URLs): *Today* follows the daily rotation (the default), any
+other pick is **pinned** until changed. **Live weather** shows current conditions on home and lock
 from **Open-Meteo** (free, keyless, open-source data): you type a **city**
 (`/api/geocode`) and only its coordinates are stored, on-device — **GPS is
 never consulted**; readings (`/api/weather`) are cached 15 minutes agent-side.

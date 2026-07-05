@@ -11,7 +11,7 @@
 # Stdlib only. Run:  python3 tests/smoke.py   (exit 0 = pass)
 # ============================================================================
 import json, os, re, socket, subprocess, sys, tempfile, time
-import urllib.request, urllib.error
+import urllib.request, urllib.error, urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -189,6 +189,12 @@ def main():
 
         # ---- Live services (opt-in egress; these checks trigger NO fetch) ----
         check("wallpaper/daily is 401 without token", req("GET", "/api/wallpaper/daily")[0] == 401)
+        check("wallpaper/list is 401 without token", req("GET", "/api/wallpaper/list")[0] == 401)
+        st, _b = req("GET", "/api/wallpaper/image?id=/etc/passwd", token)
+        check("wallpaper image rejects a non-Bing id (no open proxy)", st == 404)
+        st, _b = req("GET", "/api/wallpaper/image?id=" +
+                     urllib.parse.quote("/th?id=OHR.X/../secret"), token)
+        check("wallpaper image rejects a traversal-shaped id", st == 404)
         check("weather is 401 without token", req("GET", "/api/weather?lat=1&lon=1")[0] == 401)
         st, d = j("/api/weather", token)   # no place given → honest ask, no egress
         check("weather without a place degrades honestly",

@@ -471,7 +471,12 @@ input  { font: inherit; }
    parallax, no lines — quiet by design. The A–Z grid lives in the drawer.
    ============================================================================ */
 #v-home {
-  background: var(--wallpaper, radial-gradient(120% 82% at 50% 6%, #0C1522 0%, #070D15 55%, #04080E 100%));
+  /* --wp-scrim: an adjustable dark fill between the wallpaper and the content
+     (Personalize › Wallpaper contrast), so text and icons stay readable on a
+     light photo. Default is fully transparent. */
+  background:
+    linear-gradient(var(--wp-scrim, rgba(0, 0, 0, 0)), var(--wp-scrim, rgba(0, 0, 0, 0))),
+    var(--wallpaper, radial-gradient(120% 82% at 50% 6%, #0C1522 0%, #070D15 55%, #04080E 100%));
 }
 
 /* soft aura — two blurred gradient blobs, breathing slowly. Calm, not busy. */
@@ -1108,7 +1113,9 @@ input  { font: inherit; }
   position: absolute; inset: 0; z-index: 90;
   display: flex; flex-direction: column; align-items: center;
   padding: 54px 22px 34px;
-  background: var(--wallpaper,
+  background:
+    linear-gradient(var(--wp-scrim, rgba(0, 0, 0, 0)), var(--wp-scrim, rgba(0, 0, 0, 0))),
+    var(--wallpaper,
     radial-gradient(120% 76% at 50% -10%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 60%),
     radial-gradient(90% 55% at 10% 110%, rgba(90, 58, 214, .11), transparent 60%),
     var(--bg));
@@ -2809,3 +2816,131 @@ input  { font: inherit; }
 .rad-opt.sel .rad-ic { color: #04121a; background: var(--accent); border-color: transparent; transform: scale(1.16);
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 28%, transparent), 0 10px 24px -6px var(--accent); }
 .rad-opt.sel .rad-lbl { color: var(--text-0); }
+
+/* ============================================================================
+   APPEARANCE — Personalize › Menus & surfaces.
+   Three user-set switches, all pure CSS driven by data attributes on :root
+   (applyAppearance in shell.js):
+     data-ui="light"        — a daylight token set for menus/screens/apps.
+                              Home, lock and recents keep the night language:
+                              their content sits on the wallpaper, where light
+                              text belongs, and the adjustable --wp-scrim (the
+                              wallpaper-contrast fill) guarantees legibility.
+     data-glass="frosted"   — airier, more translucent surfaces, heavier blur
+     data-glass="solid"     — fully opaque surfaces for maximum legibility
+   (data-glass="glass" is the default look and adds no overrides.)
+   ============================================================================ */
+:root[data-ui="light"] {
+  --bg:        #E9F0F6;
+  --s0:        #F2F7FB;
+  --s1:        #FCFEFF;
+  --s2:        #E7EFF6;
+  --s3:        #D7E4EE;
+  --s4:        #C2D5E4;
+  --line:      rgba(18, 48, 76, .13);
+  --line-hi:   rgba(18, 48, 76, .24);
+  --glass:     rgba(252, 254, 255, .62);
+  --text-0:    #0A1A27;
+  --text-1:    #2C4557;
+  --text-2:    #587185;
+  --text-3:    #8CA3B4;
+  --edge:      inset 0 1px 0 rgba(255, 255, 255, .65);
+  --shadow-1:  0 1px 2px rgba(25, 45, 65, .1), 0 12px 32px -18px rgba(25, 45, 65, .3);
+  --shadow-2:  0 2px 6px rgba(25, 45, 65, .12), 0 24px 60px -24px rgba(25, 45, 65, .35);
+}
+/* home, lock and the task switcher keep the night tokens — their text lives
+   on the wallpaper, not on a menu surface */
+:root[data-ui="light"] #v-home, :root[data-ui="light"] #lock, :root[data-ui="light"] #recents {
+  --s1: #0B141F; --s2: #101D2C; --s3: #182A3D;
+  --line: rgba(158, 202, 238, .10); --line-hi: rgba(158, 202, 238, .20);
+  --text-0: #EEF7FD; --text-1: #B9CFDF; --text-2: #7593A9; --text-3: #435B70;
+  --edge: inset 0 1px 0 rgba(255, 255, 255, .045);
+}
+/* panels with hardcoded night gradients get daylight equivalents */
+:root[data-ui="light"] #pane {
+  background: linear-gradient(rgba(244, 249, 252, .92), rgba(244, 249, 252, .55));
+}
+:root[data-ui="light"] #control {
+  background: linear-gradient(180deg, rgba(246, 250, 253, .9), rgba(233, 241, 248, .94));
+}
+:root[data-ui="light"] .prompt-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .8), rgba(255, 255, 255, 0) 35%),
+    rgba(240, 246, 251, .96);
+}
+:root[data-ui="light"] .card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .55), rgba(255, 255, 255, 0) 42%),
+    var(--s1);
+}
+:root[data-ui="light"] #helm { background: linear-gradient(rgba(244, 249, 252, .0), rgba(233, 241, 248, .6)); }
+
+/* ---- glass level: frosted (airier + more blur) / solid (opaque) ---- */
+:root[data-glass="frosted"] .card,
+:root[data-glass="frosted"] .upnext,
+:root[data-glass="frosted"] .home-search {
+  background: color-mix(in srgb, var(--s1) 52%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2);
+}
+:root[data-glass="frosted"] #control {
+  -webkit-backdrop-filter: blur(38px) saturate(1.5); backdrop-filter: blur(38px) saturate(1.5);
+  background: linear-gradient(180deg, rgba(10, 18, 28, .55), rgba(5, 9, 15, .6));
+}
+:root[data-glass="frosted"][data-ui="light"] #control {
+  background: linear-gradient(180deg, rgba(246, 250, 253, .6), rgba(233, 241, 248, .65));
+}
+:root[data-glass="frosted"] .prompt-card {
+  -webkit-backdrop-filter: blur(26px); backdrop-filter: blur(26px);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, 0) 35%),
+    color-mix(in srgb, var(--s1) 62%, transparent);
+}
+:root[data-glass="solid"] .card,
+:root[data-glass="solid"] .upnext,
+:root[data-glass="solid"] .home-search,
+:root[data-glass="solid"] .live-ribbon {
+  background: var(--s1);
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+:root[data-glass="solid"] #control {
+  background: linear-gradient(180deg, var(--s0), var(--bg));
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+:root[data-glass="solid"] .prompt-card {
+  background: var(--s0);
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+:root[data-glass="solid"] .focus-card {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--col) 22%, #0E1620),
+    color-mix(in srgb, var(--col) 8%, #090F17));
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
+
+/* ---- live wallpaper gallery (its own page) ---- */
+.wpg-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.wpg-item {
+  position: relative; overflow: hidden; text-align: left;
+  border-radius: 16px; aspect-ratio: 3 / 4;
+  border: 1px solid var(--line);
+  background: var(--s1);
+  box-shadow: var(--edge), var(--shadow-1);
+  transition: transform .25s var(--spring), border-color .2s;
+}
+.wpg-item:active { transform: scale(.97); }
+.wpg-item.on { border-color: color-mix(in srgb, var(--accent) 65%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent), var(--shadow-1); }
+.wpg-item img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.wpg-lbl {
+  position: absolute; left: 0; right: 0; bottom: 0; padding: 22px 10px 8px;
+  font-size: 11px; color: #EEF7FD; line-height: 1.3;
+  background: linear-gradient(transparent, rgba(3, 7, 12, .82));
+}
+.wpg-lbl .wl-day { display: block; font-family: var(--mono); font-size: 9px;
+  letter-spacing: .1em; text-transform: uppercase; color: rgba(238, 247, 253, .65); margin-bottom: 2px; }
+.wpg-item .wp-chk { position: absolute; top: 8px; right: 8px; color: #fff;
+  background: color-mix(in srgb, var(--accent) 80%, #000); border-radius: 50%; padding: 3px; }
+.wpg-item .wl-daily { position: absolute; top: 8px; left: 8px;
+  font-family: var(--mono); font-size: 9px; letter-spacing: .08em; text-transform: uppercase;
+  color: #EEF7FD; background: rgba(3, 7, 12, .55); border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 999px; padding: 3px 8px; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
