@@ -600,8 +600,12 @@ class AIEngine:
 
         messages = self._messages(prompt, use_memory, situation)
         try:
+            # think=False: Gemma 4 (and other reasoning models) otherwise spend the
+            # whole token budget on a hidden chain-of-thought and return empty
+            # content — and on a Pi we want fast, direct answers/tool-calls. Ollama
+            # ignores this for non-reasoning models, so it's safe.
             payload = json.dumps({"model": b["model"], "messages": messages,
-                                  "stream": False}).encode()
+                                  "stream": False, "think": False}).encode()
             req = urllib.request.Request(OLLAMA + "/api/chat", data=payload,
                                          headers={"content-type": "application/json"})
             with urllib.request.urlopen(req, timeout=120) as r:
@@ -647,7 +651,7 @@ class AIEngine:
         # There is NO keyword gate: the model itself decides whether the intent
         # needs actions (a plan) or just words. It reasons over the whole catalog.
         want_tools = s.get("trustLevel", 1) >= 1
-        body = {"model": b["model"], "messages": messages, "stream": True}
+        body = {"model": b["model"], "messages": messages, "stream": True, "think": False}
         if want_tools:
             body["tools"] = self._tools()
 
