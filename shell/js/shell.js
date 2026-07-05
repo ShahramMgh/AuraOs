@@ -2542,8 +2542,12 @@
   async function renderAIMemory() {
     const id = 'sys-ai-memory';
     $('#screenScroll').innerHTML = shead('Intelligence', 'Memory') + loadingCard();
-    const mem = await Sov.ai.memory();
+    const [mem, aiStat] = await Promise.all([Sov.ai.memory(), Sov.ai.status()]);
     if (!stillOn(id)) return;
+    const mp = (aiStat && aiStat.memory) || {};
+    const vaultRow = mp.encrypted ? `<div class="row"><span class="glyph" style="color:var(--good,#4ade80)">${ic('lock', 18)}</span>
+      <span class="rtext"><div class="rtitle" style="font-size:13px">${mp.available ? 'Encrypted in the Vault' : 'Sealed — Vault locked'}</div>
+        <div class="rsub">${mp.fscrypt ? 'fscrypt (AES-256-XTS) + ' : ''}app-layer envelope encryption. Only you, when unlocked.</div></span></div>` : '';
     const items = mem.length ? mem.map(m => `<div class="row"><span class="glyph">${ic('memory',18)}</span>
       <span class="rtext"><div class="rtitle" style="font-size:13px">${esc(m.text)}</div>
         <div class="rsub mono">${fmtWhen(m.ts)}</div></span>
@@ -2551,7 +2555,8 @@
       : '<div class="row muted">No memories yet.</div>';
     $('#screenScroll').innerHTML = `
       ${shead('Intelligence', 'Memory', 'Memory belongs to you: local, editable, and yours to delete. Nothing here is hidden.')}
-      <div class="card">${items}</div>
+      ${vaultRow ? `<div class="card">${vaultRow}</div>` : ''}
+      <div class="card" style="margin-top:${vaultRow ? '10px' : '0'}">${items}</div>
       <div class="card" style="margin-top:10px">
         <button class="row tappable" data-addmem style="width:100%;text-align:left"><span class="glyph">${ic('spark',18)}</span>
           <span class="rtext"><div class="rtitle">Add a memory</div><div class="rsub">Tell the assistant something to remember</div></span></button>

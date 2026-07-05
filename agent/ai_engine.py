@@ -33,6 +33,7 @@
 # ============================================================================
 import json, os, re, time, urllib.request
 from collections import Counter
+from vault import Vault   # Manifest P11 — memory lives encrypted in the Vault
 
 OLLAMA = "http://127.0.0.1:11434"
 
@@ -149,18 +150,44 @@ SYSTEM_PROMPT = (
 
 
 class AIEngine:
-    def __init__(self, state_dir):
+    def __init__(self, state_dir, vault=None):
         self.dir = state_dir
         os.makedirs(state_dir, exist_ok=True)
         self.f_settings = os.path.join(state_dir, "ai_settings.json")
         self.f_perms = os.path.join(state_dir, "ai_permissions.json")
-        self.f_mem = os.path.join(state_dir, "ai_memory.json")
         self.f_act = os.path.join(state_dir, "ai_activity.json")
-        self.f_eps = os.path.join(state_dir, "ai_episodes.json")     # experiential log
         self.f_dismiss = os.path.join(state_dir, "ai_dismissed.json")  # snoozed suggestions
+        # Memory (P11): the user-owned facts and the experiential log are the
+        # sensitive, personal records. They live ENCRYPTED in the Vault, keyed
+        # by logical name (not a plaintext file path). Settings/perms/activity
+        # stay plain in the state dir — they are config and the inspectable
+        # transparency log, not personal memory.
+        self.vault = vault or Vault()
+        self.f_mem = "ai_memory"                       # -> Vault (encrypted)
+        self.f_eps = "ai_episodes"                     # -> Vault (encrypted)
+        self._encrypted = {self.f_mem, self.f_eps}
+        self._migrate_plaintext(state_dir)
+
+    def _migrate_plaintext(self, state_dir):
+        """One-time move: if a previous build left plaintext memory in the state
+        dir, seal it into the Vault and delete the plaintext so P11 holds. Only
+        runs when the Vault is available (unlocked)."""
+        if not self.vault.available():
+            return
+        for name in (self.f_mem, self.f_eps):
+            legacy = os.path.join(state_dir, name + ".json")
+            if os.path.exists(legacy) and not self.vault.has(name):
+                try:
+                    with open(legacy) as fh:
+                        self.vault.write_json(name, json.load(fh))
+                    os.remove(legacy)
+                except Exception:
+                    pass   # leave the plaintext for the user rather than lose it
 
     # ---- json store helpers ------------------------------------------------
     def _load(self, path, default):
+        if path in self._encrypted:
+            return self.vault.read_json(path, default)
         try:
             with open(path) as fh:
                 return json.load(fh)
@@ -168,6 +195,9 @@ class AIEngine:
             return json.loads(json.dumps(default))   # deep copy of default
 
     def _save(self, path, data):
+        if path in self._encrypted:
+            self.vault.write_json(path, data)         # sealed, then atomic-replaced
+            return
         tmp = path + ".tmp"
         with open(tmp, "w") as fh:
             json.dump(data, fh, indent=2)
@@ -462,6 +492,7 @@ class AIEngine:
             "provider": s["provider"], "backend": self.backend(),
             "memoryCount": len(self.memory()), "activityCount": len(self.activity()),
             "episodeCount": len(self.episodes()), "routineCount": len(self.routines()),
+            "memory": self.vault.status(),   # P11 — where the user's memory lives + how it's protected
             "perms": self.perms(),
         }
 

@@ -147,6 +147,21 @@ def main():
         # ---- AI Engine backend detection (skip inference; just detection) ----
         st, d = j("/api/ai/status", token)
         check("ai status responds", st == 200 and "backend" in d)
+        check("ai reports memory lives in the Vault, encrypted",
+              d.get("memory", {}).get("vault") is True and d["memory"].get("encrypted") is True)
+
+        # ---- AI memory is ENCRYPTED at rest (Manifest P11) ----
+        secret = "smoke-secret-allergic-to-penicillin"
+        j("/api/ai/memory/add", token, "POST", {"text": secret})
+        st, d = j("/api/ai/memory", token)
+        check("memory saved + readable via API", any(secret in m.get("text", "") for m in (d if isinstance(d, list) else [])))
+        vault_dir = os.path.join(home, ".local", "share", "aura", "vault")
+        enc = os.path.join(vault_dir, "ai_memory.enc")
+        blob = open(enc, "rb").read() if os.path.exists(enc) else b""
+        check("memory stored as an encrypted envelope", blob.startswith(b"AVLT"))
+        check("plaintext memory never hits the disk", secret.encode() not in blob)
+        check("no plaintext ai_memory.json left in state dir",
+              not os.path.exists(os.path.join(state, "ai_memory.json")))
 
     finally:
         proc.terminate()

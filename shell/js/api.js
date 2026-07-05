@@ -1076,6 +1076,8 @@ const Sov = (() => {
         backend: { available: true, kind: 'preview', models: ['llama3.2:3b (simulated)'], model: 'llama3.2:3b (simulated)' },
         memoryCount: simAI.memory.length, activityCount: simAI.activity.length,
         episodeCount: simAI.episodes.length, routineCount: this.routines().length, perms: { ...simAI.perms },
+        memory: { vault: true, available: true, encrypted: true,
+                  envelope: 'HMAC-SHA256 PRF-CTR · encrypt-then-MAC · scrypt KDF', fscrypt: false },
       };
     },
     setSettings(pt) {
