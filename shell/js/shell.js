@@ -126,7 +126,8 @@
         PREF.set('wxPlace', { name: p.name, country: p.country, lat: p.lat, lon: p.lon });
         close();
         await refreshWeather(true);
-        if (S.view === 'personalize') renderPersonalize();
+        if (S.view === 'pz-weather') renderPzWeather();
+        else if (S.view === 'personalize') renderPersonalize();
         toast(`Weather set to ${p.name}`, 'ok', 'check');
       });
     };
@@ -3300,70 +3301,129 @@
   /* ======================================================================
      PERSONALIZE — wallpaper, home focus, and which apps sit on home
      ====================================================================== */
+  /* ----------------------------------------------------------------------
+     Personalize is a HUB of small sub-pages (it outgrew one screen): each
+     row below opens its own page, and the row's subtitle shows the current
+     choice at a glance. Back returns to the hub. All device-local.
+     ---------------------------------------------------------------------- */
+  const pzRow = (nav, icon, title, sub) => `
+    <button class="row tappable" data-nav="${nav}" style="width:100%;text-align:left">
+      <span class="glyph">${ic(icon, 18)}</span>
+      <span class="rtext"><div class="rtitle">${title}</div><div class="rsub">${sub}</div></span>
+      <span class="chev">${ic('chev', 16)}</span></button>`;
+
   function renderPersonalize() {
-    const apps = Sov.apps();
-    const cfg = HOME_CFG || Sov._homeCfgSync();
-    const wp = PREF.get('wallpaper', 'petrol');
-    const liveWp = PREF.get('liveWallpaper', false);
+    const theme = THEMES.find(t => t.id === PREF.get('theme', 'teal')) || THEMES[0];
+    const fx = FX.find(f => f.id === PREF.get('fx', 'aurora')) || FX[0];
     const wxPlace = PREF.get('wxPlace', null);
-    const focus = PREF.get('focus', null) || cfg.focus || 'assistant';
-    const hPages = homePagesIds();
-    const pageOf = id => { for (let i = 0; i < hPages.length; i++) if ((hPages[i] || []).includes(id)) return i; return -1; };
-
-    const swatches = WALLPAPERS.map(w =>
-      `<button class="wp-sw ${w.id === wp ? 'on' : ''}" data-wp="${w.id}" style="background:${w.css}">
-         <span class="wp-name">${w.name}</span>${w.id === wp ? `<span class="wp-chk">${ic('check',16)}</span>` : ''}</button>`).join('');
-
-    const focusRow = `<div class="row"><span class="pa-badge" style="--tint:${(apps.find(a=>a.id===focus)||{}).color||'var(--accent)'}">${ic((apps.find(a=>a.id===focus)||{}).glyph||'spark',16)}</span>
-        <span class="rtext"><div class="rtitle">Suggested app</div><div class="rsub">Shown large at the top of home</div></span>
-        <select class="sel" id="focusSel">${apps.map(a => `<option value="${a.id}" ${a.id === focus ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></div>`;
-
-    const appRows = apps.map(a => {
-      if (a.id === focus) return `<div class="row"><span class="pa-badge" style="--tint:${a.color}">${ic(a.glyph,16)}</span>
-        <span class="rtext"><div class="rtitle">${esc(a.name)}</div><div class="rsub" style="color:var(--accent)">home focus</div></span></div>`;
-      const pi = pageOf(a.id);
-      const opts = hPages.map((_, i) => `<option value="${i}" ${pi === i ? 'selected' : ''}>Page ${i + 1}</option>`).join('')
-        + `<option value="-1" ${pi < 0 ? 'selected' : ''}>Off home</option>`;
-      return `<div class="row"><span class="pa-badge" style="--tint:${a.color}">${ic(a.glyph,16)}</span>
-        <span class="rtext"><div class="rtitle">${esc(a.name)}</div></span>
-        <select class="sel" data-appage="${a.id}">${opts}</select></div>`;
-    }).join('');
-
-    const fx = PREF.get('fx', 'aurora');
-    const lvl = PREF.get('fxLevel', 'calm');
-    const night = PREF.get('nightlight', false);
-    const fxChips = FX.map(f => `
-      <button class="fx-chip ${f.id === fx ? 'on' : ''}" data-fx="${f.id}">
-        <span class="fx-prev" data-p="${f.id}" aria-hidden="true"></span>
-        <span class="fx-name">${f.name}</span><span class="fx-sub">${f.sub}</span>
-        ${f.id === fx ? `<span class="wp-chk">${ic('check',14)}</span>` : ''}</button>`).join('');
-    const lvlSeg = `<div class="seg fxlvl">${FX_LEVELS.map(l =>
-      `<button class="${l.id === lvl ? 'on acc' : ''}" data-fxlvl="${l.id}">${l.name}</button>`).join('')}</div>`;
-
-    const insSide = PREF.get('insSide', 'left');
-    const insHidden = PREF.get('insHidden', false);
-    const theme = PREF.get('theme', 'teal');
-    const themeChips = THEMES.map(t => `
-      <button class="th-chip ${t.id === theme ? 'on' : ''}" data-th="${t.id}" style="--c:${t.accent}">
-        <span class="th-dot" aria-hidden="true"></span>
-        <span class="th-name">${t.name}</span></button>`).join('');
-
+    const pick = PREF.get('liveWpPick', null);
+    const wpName = PREF.get('liveWallpaper', false)
+      ? (pick ? `Pinned: ${pick.title || 'an image'}` : 'Daily Bing image')
+      : (PREF.get('wallpaperImg', null) ? 'Your photo'
+         : (WALLPAPERS.find(w => w.id === PREF.get('wallpaper', 'petrol')) || WALLPAPERS[0]).name);
+    const focusApp = Sov.app(PREF.get('focus', null) || (HOME_CFG || Sov._homeCfgSync()).focus || 'assistant');
     $('#screenScroll').innerHTML = `
       ${shead('Device', 'Personalize', 'Make it yours — nothing here leaves the device.')}
+      <div class="section-head"><span class="eyebrow">Look &amp; feel</span></div>
+      <div class="card">
+        ${pzRow('pz-look', 'sun', 'Appearance',
+          esc(`${theme.name} · ${cap(PREF.get('uiTheme', 'dark'))} menus · ${cap(PREF.get('glass', 'glass'))} surfaces`))}
+        ${pzRow('pz-wallpaper', 'photo', 'Wallpaper',
+          esc(wpName + (wpScrim() ? ` · contrast ${wpScrim()}%` : '')))}
+        ${pzRow('pz-fx', 'spark', 'Ambience',
+          esc(`${fx.name} · ${cap(PREF.get('fxLevel', 'calm'))}${PREF.get('nightlight', false) ? ' · Night Light' : ''}`))}
+        ${pzRow('pz-weather', 'cloud', 'Weather',
+          PREF.get('weatherOn', false) ? esc(wxPlace ? wxPlace.name : 'On — pick a place') : 'Off — nothing is fetched')}
+      </div>
+      <div class="section-head"><span class="eyebrow">Home screen</span></div>
+      <div class="card">
+        ${pzRow('pz-clock', 'clock', 'Clock & widgets',
+          esc(`${(CLOCK_STYLES.find(c => c.id === clockStyle()) || {}).name || 'Aura'} clock · Up next ${PREF.get('upnext', true) ? 'on' : 'off'}`))}
+        ${pzRow('pz-icons', 'grid', 'Icons',
+          esc(`${(TILE_SHAPES.find(t => t.id === PREF.get('tileShape', 'squircle')) || {}).name || 'Squircle'} · labels ${PREF.get('tileLabels', true) ? 'on' : 'off'}`))}
+        ${pzRow('pz-apps', 'home', 'Apps & pages',
+          esc(`${homePagesIds().length} page${homePagesIds().length > 1 ? 's' : ''} · focus: ${(focusApp || {}).name || '—'}`))}
+      </div>
+      <div style="height:8px"></div>`;
+    bindNav($('#screenScroll'));
+  }
+
+  // ---- Personalize › Appearance: color theme, menu theme, surfaces, handle --
+  function renderPzLook() {
+    const theme = PREF.get('theme', 'teal');
+    const insSide = PREF.get('insSide', 'left');
+    const insHidden = PREF.get('insHidden', false);
+    $('#screenScroll').innerHTML = `
+      ${shead('Personalize', 'Appearance', 'Color, menu theme and how surfaces are built.')}
       <div class="section-head"><span class="eyebrow">Color theme</span>
         <span class="muted" style="font-size:11px">tints the UI and the Aura</span></div>
-      <div class="th-grid">${themeChips}</div>
-      <div class="section-head"><span class="eyebrow">Wallpaper</span></div>
-      <div class="wp-grid">${swatches}</div>
+      <div class="th-grid">${THEMES.map(t => `
+        <button class="th-chip ${t.id === theme ? 'on' : ''}" data-th="${t.id}" style="--c:${t.accent}">
+          <span class="th-dot" aria-hidden="true"></span>
+          <span class="th-name">${t.name}</span></button>`).join('')}</div>
+      <div class="section-head"><span class="eyebrow">Menus &amp; surfaces</span>
+        <span class="muted" style="font-size:11px">home &amp; lock keep the night look</span></div>
+      <div class="card">
+        <div class="row"><span class="glyph">${ic('sun',18)}</span>
+          <span class="rtext"><div class="rtitle">Menu theme</div><div class="rsub">Menus, settings &amp; apps</div></span>
+          <div class="seg">${['dark','light'].map(m =>
+            `<button class="${(PREF.get('uiTheme','dark')) === m ? 'on acc' : ''}" data-uitheme="${m}">${cap(m)}</button>`).join('')}</div></div>
+        <div class="row"><span class="glyph">${ic('layers',18)}</span>
+          <span class="rtext"><div class="rtitle">Surfaces</div><div class="rsub">Frosted is liquid glass; Solid is fully opaque</div></span>
+          <div class="seg">${GLASS_MODES.map(g =>
+            `<button class="${(PREF.get('glass','glass')) === g.id ? 'on acc' : ''}" data-glassmode="${g.id}">${g.name}</button>`).join('')}</div></div>
+      </div>
+      <div class="section-head"><span class="eyebrow">Insight margin</span>
+        <span class="muted" style="font-size:11px">privacy &amp; status handle</span></div>
+      <div class="card">
+        <button class="row tappable" data-insshow style="width:100%;text-align:left"><span class="glyph">${ic('shieldChk',18)}</span>
+          <span class="rtext"><div class="rtitle">Show handle</div>
+            <div class="rsub">The privacy &amp; status shortcut on screen · drag it up or down</div></span>
+          <span class="switch ${insHidden ? '' : 'on'}"></span></button>
+        <div class="row"><span class="glyph">${ic('layers',18)}</span>
+          <span class="rtext"><div class="rtitle">Screen side</div>
+            <div class="rsub">Which edge the handle lives on</div></span>
+          <div class="seg">${['left','right'].map(sd =>
+            `<button class="${insSide === sd ? 'on acc' : ''}" data-insside="${sd}">${cap(sd)}</button>`).join('')}</div></div></div>
+      <div style="height:8px"></div>`;
+    $('#screenScroll').querySelectorAll('[data-th]').forEach(b => b.onclick = () => {
+      PREF.set('theme', b.dataset.th); applyTheme(); renderPzLook();
+    });
+    $('#screenScroll').querySelectorAll('[data-uitheme]').forEach(b => b.onclick = () => {
+      PREF.set('uiTheme', b.dataset.uitheme); applyAppearance(); renderPzLook();
+    });
+    $('#screenScroll').querySelectorAll('[data-glassmode]').forEach(b => b.onclick = () => {
+      PREF.set('glass', b.dataset.glassmode); applyAppearance(); renderPzLook();
+    });
+    $('#screenScroll').querySelectorAll('[data-insside]').forEach(b => b.onclick = () => {
+      PREF.set('insSide', b.dataset.insside); applyInsightSide(); updateInsight(); renderPzLook();
+    });
+    const isw = $('#screenScroll').querySelector('[data-insshow]');
+    if (isw) isw.onclick = () => {
+      PREF.set('insHidden', !PREF.get('insHidden', false)); updateInsight(); renderPzLook();
+    };
+  }
+
+  // ---- Personalize › Wallpaper: presets, photos, the live daily + contrast --
+  function renderPzWallpaper() {
+    const wp = PREF.get('wallpaper', 'petrol');
+    const liveWp = PREF.get('liveWallpaper', false);
+    $('#screenScroll').innerHTML = `
+      ${shead('Personalize', 'Wallpaper', 'Behind home and the lock screen alike.')}
+      <div class="wp-grid">${WALLPAPERS.map(w =>
+        `<button class="wp-sw ${!liveWp && w.id === wp ? 'on' : ''}" data-wp="${w.id}" style="background:${w.css}">
+           <span class="wp-name">${w.name}</span>${!liveWp && w.id === wp ? `<span class="wp-chk">${ic('check',16)}</span>` : ''}</button>`).join('')}</div>
       <button class="mini-btn" id="wpFromPhotos" style="margin-top:10px">${ic('photo',14)} Choose from Photos</button>
-      <div class="card" style="margin-top:10px">
+      <div class="section-head"><span class="eyebrow">Live wallpaper</span>
+        <span class="muted" style="font-size:11px">uses the network, only while on</span></div>
+      <div class="card">
         <button class="row tappable" data-livewp style="width:100%;text-align:left"><span class="glyph">${ic('globe',18)}</span>
           <span class="rtext"><div class="rtitle">Daily wallpaper</div>
             <div class="rsub">${liveWp
               ? (_wpDaily ? (_wpDaily.available
-                  ? esc(`Today: ${_wpDaily.copyright || _wpDaily.title || 'Bing Image of the Day'}`)
+                  ? esc(`${_wpDaily.pinned ? 'Pinned' : 'Today'}: ${_wpDaily.copyright || _wpDaily.title || 'Bing Image of the Day'}`)
                   : esc(_wpDaily.error || 'Not available right now.')) : 'Fetching today’s image…')
-              : 'One Bing photo a day, on home &amp; lock · uses the network, only while on'}</div></span>
+              : 'One Bing photo a day, on home &amp; lock'}</div></span>
           <span class="switch ${liveWp ? 'on' : ''}"></span></button>
         <button class="row tappable" data-nav="wp-gallery" style="width:100%;text-align:left"><span class="glyph">${ic('photo',18)}</span>
           <span class="rtext"><div class="rtitle">Gallery</div>
@@ -3371,18 +3431,9 @@
               return p ? esc(`Pinned: ${p.title || 'an image'}`) : 'Browse the recent images · today’s is the default'; })()}</div></span>
           <span class="chev">${ic('chev',16)}</span></button>
       </div>
-      <div class="section-head"><span class="eyebrow">Menus &amp; surfaces</span>
-        <span class="muted" style="font-size:11px">legibility first — home &amp; lock keep the night look</span></div>
+      <div class="section-head"><span class="eyebrow">Legibility</span></div>
       <div class="card">
-        <div class="row"><span class="glyph">${ic('sun',18)}</span>
-          <span class="rtext"><div class="rtitle">Menu theme</div><div class="rsub">Menus, settings &amp; apps</div></span>
-          <div class="seg">${['dark','light'].map(m =>
-            `<button class="${(PREF.get('uiTheme','dark')) === m ? 'on acc' : ''}" data-uitheme="${m}">${cap(m)}</button>`).join('')}</div></div>
-        <div class="row"><span class="glyph">${ic('layers',18)}</span>
-          <span class="rtext"><div class="rtitle">Surfaces</div><div class="rsub">How see-through cards &amp; panels are</div></span>
-          <div class="seg">${GLASS_MODES.map(g =>
-            `<button class="${(PREF.get('glass','glass')) === g.id ? 'on acc' : ''}" data-glassmode="${g.id}">${g.name}</button>`).join('')}</div></div>
-        <div class="slider-block" style="padding:12px 14px 14px">
+        <div class="slider-block" style="margin-top:0;background:none;border:none;box-shadow:none">
           <div class="rtitle" style="font-size:13.5px">Wallpaper contrast</div>
           <div class="rsub" style="margin:2px 0 10px">A dark fill under home &amp; lock so text stays readable on a light image</div>
           <div class="sb-row"><span class="sb-ic">${ic('sun',16)}</span>
@@ -3390,8 +3441,69 @@
             <span class="mono" id="wpScrimVal" style="width:38px;text-align:right">${wpScrim()}%</span></div>
         </div>
       </div>
-      <div class="section-head"><span class="eyebrow">Weather</span>
-        <span class="muted" style="font-size:11px">Open-Meteo · asks only while on</span></div>
+      <div style="height:8px"></div>`;
+    bindNav($('#screenScroll'));
+    $('#screenScroll').querySelectorAll('[data-wp]').forEach(b => b.onclick = () => {
+      PREF.set('wallpaperImg', null); PREF.set('wallpaper', b.dataset.wp);
+      PREF.set('liveWallpaper', false);   // picking a preset turns the live one off
+      applyWallpaper(); renderPzWallpaper();
+    });
+    const wfp = $('#wpFromPhotos'); if (wfp) wfp.onclick = () => openPhotoPicker();
+    const lwp = $('#screenScroll').querySelector('[data-livewp]');
+    if (lwp) lwp.onclick = async () => {
+      PREF.set('liveWallpaper', !PREF.get('liveWallpaper', false));
+      renderPzWallpaper();                    // switch flips immediately…
+      await applyWallpaper();                 // …then the fetch reports honestly
+      if (stillOn('pz-wallpaper')) renderPzWallpaper();
+    };
+    const wps = $('#screenScroll').querySelector('[data-wpscrim]');
+    if (wps) wps.oninput = () => {
+      PREF.set('wpScrim', +wps.value); applyAppearance();
+      const v = $('#wpScrimVal'); if (v) v.textContent = `${wps.value}%`;
+    };
+  }
+
+  // ---- Personalize › Ambience: live effects, motion, night light ------------
+  function renderPzFx() {
+    const fx = PREF.get('fx', 'aurora');
+    const lvl = PREF.get('fxLevel', 'calm');
+    const night = PREF.get('nightlight', false);
+    $('#screenScroll').innerHTML = `
+      ${shead('Personalize', 'Ambience', 'The living layer behind home and lock — rendered on-device.')}
+      <div class="fx-grid">${FX.map(f => `
+        <button class="fx-chip ${f.id === fx ? 'on' : ''}" data-fx="${f.id}">
+          <span class="fx-prev" data-p="${f.id}" aria-hidden="true"></span>
+          <span class="fx-name">${f.name}</span><span class="fx-sub">${f.sub}</span>
+          ${f.id === fx ? `<span class="wp-chk">${ic('check',14)}</span>` : ''}</button>`).join('')}</div>
+      <div class="card" style="margin-top:10px">
+        <div class="row"><span class="glyph">${ic('spark',18)}</span>
+          <span class="rtext"><div class="rtitle">Motion</div><div class="rsub">How alive the ambience feels</div></span>
+          <div class="seg fxlvl">${FX_LEVELS.map(l =>
+            `<button class="${l.id === lvl ? 'on acc' : ''}" data-fxlvl="${l.id}">${l.name}</button>`).join('')}</div></div>
+        <button class="row tappable" data-nl style="width:100%;text-align:left"><span class="glyph">${ic('sun',18)}</span>
+          <span class="rtext"><div class="rtitle">Night Light</div><div class="rsub">Warm tint across the whole screen</div></span>
+          <span class="switch ${night ? 'on' : ''}"></span></button>
+      </div>
+      <div style="height:8px"></div>`;
+    $('#screenScroll').querySelectorAll('[data-fx]').forEach(b => b.onclick = () => {
+      PREF.set('fx', b.dataset.fx); applyEffects(); renderPzFx();
+      if (b.dataset.fx === 'weather' && !weatherOn())
+        toast('Turn on Live weather (Personalize › Weather) to let the sky drive this', '', 'sun');
+    });
+    $('#screenScroll').querySelectorAll('[data-fxlvl]').forEach(b => b.onclick = () => {
+      PREF.set('fxLevel', b.dataset.fxlvl); applyEffects(); renderPzFx();
+    });
+    const nl = $('#screenScroll').querySelector('[data-nl]');
+    if (nl) nl.onclick = () => {
+      PREF.set('nightlight', !PREF.get('nightlight', false)); applyEffects(); renderPzFx();
+    };
+  }
+
+  // ---- Personalize › Weather: the live reading and its place ----------------
+  function renderPzWeather() {
+    const wxPlace = PREF.get('wxPlace', null);
+    $('#screenScroll').innerHTML = `
+      ${shead('Personalize', 'Weather', 'Open-Meteo, via the agent — it asks only while this is on.')}
       <div class="card">
         <button class="row tappable" data-wxtgl style="width:100%;text-align:left"><span class="glyph">${ic('sun',18)}</span>
           <span class="rtext"><div class="rtitle">Live weather</div>
@@ -3409,30 +3521,25 @@
                 : esc(_wx.data.error || 'The weather service could not be reached.')}</div></span></div>`
           : ''}
       </div>
-      <div class="section-head"><span class="eyebrow">Live effects</span>
-        <span class="muted" style="font-size:11px">ambient · rendered on-device</span></div>
-      <div class="fx-grid">${fxChips}</div>
-      <div class="card" style="margin-top:10px">
-        <div class="row"><span class="glyph">${ic('spark',18)}</span>
-          <span class="rtext"><div class="rtitle">Motion</div><div class="rsub">How alive the ambience feels</div></span>${lvlSeg}</div>
-        <button class="row tappable" data-nl style="width:100%;text-align:left"><span class="glyph">${ic('sun',18)}</span>
-          <span class="rtext"><div class="rtitle">Night Light</div><div class="rsub">Warm tint across the whole screen</div></span>
-          <span class="switch ${night ? 'on' : ''}"></span></button>
-      </div>
-      <div class="section-head"><span class="eyebrow">Insight margin</span>
-        <span class="muted" style="font-size:11px">privacy &amp; status handle</span></div>
-      <div class="card">
-        <button class="row tappable" data-insshow style="width:100%;text-align:left"><span class="glyph">${ic('shieldChk',18)}</span>
-          <span class="rtext"><div class="rtitle">Show handle</div>
-            <div class="rsub">The privacy &amp; status shortcut on screen · drag it up or down</div></span>
-          <span class="switch ${insHidden ? '' : 'on'}"></span></button>
-        <div class="row"><span class="glyph">${ic('layers',18)}</span>
-          <span class="rtext"><div class="rtitle">Screen side</div>
-            <div class="rsub">Which edge the handle lives on</div></span>
-          <div class="seg">${['left','right'].map(sd =>
-            `<button class="${insSide === sd ? 'on acc' : ''}" data-insside="${sd}">${cap(sd)}</button>`).join('')}</div></div></div>
-      <div class="section-head"><span class="eyebrow">Home clock</span>
-        <span class="muted" style="font-size:11px">style &amp; position — like a widget</span></div>
+      <div class="pa-note" style="margin-top:10px">Tip: the “Match the sky” ambience (Personalize › Ambience) follows this reading.</div>
+      <div style="height:8px"></div>`;
+    const wxt = $('#screenScroll').querySelector('[data-wxtgl]');
+    if (wxt) wxt.onclick = async () => {
+      const on = !PREF.get('weatherOn', false);
+      PREF.set('weatherOn', on);
+      renderPzWeather();
+      if (on && !PREF.get('wxPlace', null)) return openPlacePicker();
+      await refreshWeather(true);
+      if (stillOn('pz-weather')) renderPzWeather();
+    };
+    const wxp = $('#screenScroll').querySelector('[data-wxplace]');
+    if (wxp) wxp.onclick = () => openPlacePicker();
+  }
+
+  // ---- Personalize › Clock & widgets ----------------------------------------
+  function renderPzClock() {
+    $('#screenScroll').innerHTML = `
+      ${shead('Personalize', 'Clock & widgets', 'The home clock is a widget — style it, place it, size it.')}
       <div class="clk-grid">${CLOCK_STYLES.map(c => `
         <button class="clk-chip ${c.id === clockStyle() ? 'on' : ''}" data-clk="${c.id}">
           <span class="clk-prev cw-${c.id}" aria-hidden="true">${clockInner(c.id, '9:41')}</span>
@@ -3457,8 +3564,26 @@
           <span class="rtext"><div class="rtitle">Up next</div><div class="rsub">Your next calendar event on home — hidden when nothing is scheduled</div></span>
           <span class="switch ${PREF.get('upnext', true) ? 'on' : ''}"></span></button>
       </div>
-      <div class="section-head"><span class="eyebrow">Icons</span>
-        <span class="muted" style="font-size:11px">shape &amp; labels — home and drawer</span></div>
+      <div style="height:8px"></div>`;
+    $('#screenScroll').querySelectorAll('[data-clk]').forEach(b => b.onclick = () => {
+      PREF.set('clockStyle', b.dataset.clk); renderPzClock(); toast('Clock style set', 'ok', 'check');
+    });
+    $('#screenScroll').querySelectorAll('[data-clkalign]').forEach(b => b.onclick = () => {
+      PREF.set('clockAlign', b.dataset.clkalign); renderPzClock();
+    });
+    $('#screenScroll').querySelectorAll('[data-clksize]').forEach(b => b.onclick = () => {
+      PREF.set('clockSize', b.dataset.clksize); renderPzClock();
+    });
+    const ckr = $('#screenScroll').querySelector('[data-clkreset]');
+    if (ckr) ckr.onclick = () => { PREF.set('clockY', 0); renderPzClock(); toast('Clock back at the top', 'ok', 'check'); };
+    const unx = $('#screenScroll').querySelector('[data-upnexttgl]');
+    if (unx) unx.onclick = () => { PREF.set('upnext', !PREF.get('upnext', true)); renderPzClock(); };
+  }
+
+  // ---- Personalize › Icons ---------------------------------------------------
+  function renderPzIcons() {
+    $('#screenScroll').innerHTML = `
+      ${shead('Personalize', 'Icons', 'The shape language of app icons — home and drawer alike.')}
       <div class="card">
         <div class="row"><span class="glyph">${ic('grid',18)}</span>
           <span class="rtext"><div class="rtitle">Shape</div><div class="rsub">How app icons are cut</div></span>
@@ -3468,6 +3593,36 @@
           <span class="rtext"><div class="rtitle">Labels</div><div class="rsub">App names under home tiles</div></span>
           <span class="switch ${PREF.get('tileLabels', true) ? 'on' : ''}"></span></button>
       </div>
+      <div style="height:8px"></div>`;
+    $('#screenScroll').querySelectorAll('[data-tileshape]').forEach(b => b.onclick = () => {
+      PREF.set('tileShape', b.dataset.tileshape); applyIconStyle(); renderPzIcons();
+    });
+    const tlb = $('#screenScroll').querySelector('[data-tilelbl]');
+    if (tlb) tlb.onclick = () => { PREF.set('tileLabels', !PREF.get('tileLabels', true)); applyIconStyle(); renderPzIcons(); };
+  }
+
+  // ---- Personalize › Apps & pages --------------------------------------------
+  function renderPzApps() {
+    const apps = Sov.apps();
+    const cfg = HOME_CFG || Sov._homeCfgSync();
+    const focus = PREF.get('focus', null) || cfg.focus || 'assistant';
+    const hPages = homePagesIds();
+    const pageOf = id => { for (let i = 0; i < hPages.length; i++) if ((hPages[i] || []).includes(id)) return i; return -1; };
+    const focusRow = `<div class="row"><span class="pa-badge" style="--tint:${(apps.find(a=>a.id===focus)||{}).color||'var(--accent)'}">${ic((apps.find(a=>a.id===focus)||{}).glyph||'spark',16)}</span>
+        <span class="rtext"><div class="rtitle">Suggested app</div><div class="rsub">Shown large at the top of home</div></span>
+        <select class="sel" id="focusSel">${apps.map(a => `<option value="${a.id}" ${a.id === focus ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></div>`;
+    const appRows = apps.map(a => {
+      if (a.id === focus) return `<div class="row"><span class="pa-badge" style="--tint:${a.color}">${ic(a.glyph,16)}</span>
+        <span class="rtext"><div class="rtitle">${esc(a.name)}</div><div class="rsub" style="color:var(--accent)">home focus</div></span></div>`;
+      const pi = pageOf(a.id);
+      const opts = hPages.map((_, i) => `<option value="${i}" ${pi === i ? 'selected' : ''}>Page ${i + 1}</option>`).join('')
+        + `<option value="-1" ${pi < 0 ? 'selected' : ''}>Off home</option>`;
+      return `<div class="row"><span class="pa-badge" style="--tint:${a.color}">${ic(a.glyph,16)}</span>
+        <span class="rtext"><div class="rtitle">${esc(a.name)}</div></span>
+        <select class="sel" data-appage="${a.id}">${opts}</select></div>`;
+    }).join('');
+    $('#screenScroll').innerHTML = `
+      ${shead('Personalize', 'Apps & pages', 'What sits on home, and where.')}
       <div class="section-head"><span class="eyebrow">Home focus</span></div>
       <div class="card">${focusRow}</div>
       <div class="section-head"><span class="eyebrow">Home pages</span>
@@ -3475,99 +3630,24 @@
       <div class="pa-note">${hPages.length} page${hPages.length > 1 ? 's' : ''} · assign each app to a page or take it off home · swipe between pages on the home screen, drag tiles to reorder</div>
       <div class="card">${appRows}</div>
       <div style="height:8px"></div>`;
-
-    $('#screenScroll').querySelectorAll('[data-wp]').forEach(b => b.onclick = () => {
-      PREF.set('wallpaperImg', null); PREF.set('wallpaper', b.dataset.wp); applyWallpaper(); renderPersonalize();
-    });
-    const wfp = $('#wpFromPhotos'); if (wfp) wfp.onclick = () => openPhotoPicker();
-    const lwp = $('#screenScroll').querySelector('[data-livewp]');
-    if (lwp) lwp.onclick = async () => {
-      PREF.set('liveWallpaper', !PREF.get('liveWallpaper', false));
-      renderPersonalize();                    // switch flips immediately…
-      await applyWallpaper();                 // …then the fetch reports honestly
-      renderPersonalize();
-    };
-    const wxt = $('#screenScroll').querySelector('[data-wxtgl]');
-    if (wxt) wxt.onclick = async () => {
-      const on = !PREF.get('weatherOn', false);
-      PREF.set('weatherOn', on);
-      renderPersonalize();
-      if (on && !PREF.get('wxPlace', null)) return openPlacePicker();
-      await refreshWeather(true);
-      renderPersonalize();
-    };
-    const wxp = $('#screenScroll').querySelector('[data-wxplace]');
-    if (wxp) wxp.onclick = () => openPlacePicker();
-    bindNav($('#screenScroll'));   // the Gallery row navigates (data-nav)
-    $('#screenScroll').querySelectorAll('[data-uitheme]').forEach(b => b.onclick = () => {
-      PREF.set('uiTheme', b.dataset.uitheme); applyAppearance(); renderPersonalize();
-    });
-    $('#screenScroll').querySelectorAll('[data-glassmode]').forEach(b => b.onclick = () => {
-      PREF.set('glass', b.dataset.glassmode); applyAppearance(); renderPersonalize();
-    });
-    const wps = $('#screenScroll').querySelector('[data-wpscrim]');
-    if (wps) wps.oninput = () => {
-      PREF.set('wpScrim', +wps.value); applyAppearance();
-      const v = $('#wpScrimVal'); if (v) v.textContent = `${wps.value}%`;
-    };
-    $('#screenScroll').querySelectorAll('[data-th]').forEach(b => b.onclick = () => {
-      PREF.set('theme', b.dataset.th); applyTheme(); renderPersonalize();
-    });
-    $('#screenScroll').querySelectorAll('[data-fx]').forEach(b => b.onclick = () => {
-      PREF.set('fx', b.dataset.fx); applyEffects(); renderPersonalize();
-      if (b.dataset.fx === 'weather' && !weatherOn())
-        toast('Turn on Live weather below to let the sky drive this', '', 'sun');
-    });
-    $('#screenScroll').querySelectorAll('[data-fxlvl]').forEach(b => b.onclick = () => {
-      PREF.set('fxLevel', b.dataset.fxlvl); applyEffects(); renderPersonalize();
-    });
-    const nl = $('#screenScroll').querySelector('[data-nl]');
-    if (nl) nl.onclick = () => {
-      PREF.set('nightlight', !PREF.get('nightlight', false)); applyEffects(); renderPersonalize();
-    };
-    $('#screenScroll').querySelectorAll('[data-clk]').forEach(b => b.onclick = () => {
-      PREF.set('clockStyle', b.dataset.clk); renderPersonalize(); toast('Clock style set', 'ok', 'check');
-    });
-    $('#screenScroll').querySelectorAll('[data-clkalign]').forEach(b => b.onclick = () => {
-      PREF.set('clockAlign', b.dataset.clkalign); renderPersonalize();
-    });
-    $('#screenScroll').querySelectorAll('[data-clksize]').forEach(b => b.onclick = () => {
-      PREF.set('clockSize', b.dataset.clksize); renderPersonalize();
-    });
-    const ckr = $('#screenScroll').querySelector('[data-clkreset]');
-    if (ckr) ckr.onclick = () => { PREF.set('clockY', 0); renderPersonalize(); toast('Clock back at the top', 'ok', 'check'); };
-    const unx = $('#screenScroll').querySelector('[data-upnexttgl]');
-    if (unx) unx.onclick = () => { PREF.set('upnext', !PREF.get('upnext', true)); renderPersonalize(); };
-    $('#screenScroll').querySelectorAll('[data-tileshape]').forEach(b => b.onclick = () => {
-      PREF.set('tileShape', b.dataset.tileshape); applyIconStyle(); renderPersonalize();
-    });
-    const tlb = $('#screenScroll').querySelector('[data-tilelbl]');
-    if (tlb) tlb.onclick = () => { PREF.set('tileLabels', !PREF.get('tileLabels', true)); applyIconStyle(); renderPersonalize(); };
-    $('#screenScroll').querySelectorAll('[data-insside]').forEach(b => b.onclick = () => {
-      PREF.set('insSide', b.dataset.insside); applyInsightSide(); updateInsight(); renderPersonalize();
-    });
-    const isw = $('#screenScroll').querySelector('[data-insshow]');
-    if (isw) isw.onclick = () => {
-      PREF.set('insHidden', !PREF.get('insHidden', false)); updateInsight(); renderPersonalize();
-    };
     $('#focusSel').onchange = e => {
       PREF.set('focus', e.target.value);
       // the focus is the hero card, so pull it out of the page grids
       const pgs = homePagesIds().map(p => (p || []).filter(id => id !== e.target.value));
       PREF.set('homePages', pgs);
-      renderPersonalize();
+      renderPzApps();
       toast('Home focus set', 'ok', 'check');
     };
     $('#screenScroll').querySelectorAll('[data-appage]').forEach(s => s.onchange = () => {
       const id = s.dataset.appage, target = parseInt(s.value, 10);
       let pgs = homePagesIds().map(p => (p || []).filter(x => x !== id));   // off every page
       if (target >= 0) { while (pgs.length <= target) pgs.push([]); pgs[target].push(id); }
-      PREF.set('homePages', pgs); renderPersonalize();
+      PREF.set('homePages', pgs); renderPzApps();
     });
     const ap = $('#addPage');
     if (ap) ap.onclick = () => {
       const pgs = homePagesIds().slice(); pgs.push([]); PREF.set('homePages', pgs);
-      renderPersonalize(); toast('Page added', 'ok', 'check');
+      renderPzApps(); toast('Page added', 'ok', 'check');
     };
   }
 
@@ -3846,6 +3926,13 @@
     vault:         { render: renderVault },
     settings:      { render: renderSettings },
     personalize:    { render: renderPersonalize },
+    'pz-look':      { render: renderPzLook },
+    'pz-wallpaper': { render: renderPzWallpaper },
+    'pz-fx':        { render: renderPzFx },
+    'pz-weather':   { render: renderPzWeather },
+    'pz-clock':     { render: renderPzClock },
+    'pz-icons':     { render: renderPzIcons },
+    'pz-apps':      { render: renderPzApps },
     'wp-gallery':   { render: renderWpGallery },
     'sys-about':    { render: renderAbout },
     'sys-monitor':  { render: renderMonitor },
@@ -3881,6 +3968,9 @@
 
     const target = view === 'home' ? 'v-home' : view === 'drawer' ? 'v-drawer' : 'v-screen';
     $$('.view').forEach(v => v.classList.toggle('active', v.id === target));
+    // On home the pane + helm sit on the wallpaper, so (in the light menu
+    // theme) they keep the night look there — this class is the hook.
+    $('#device').classList.toggle('on-wallpaper', view === 'home');
     $('#screenScroll').parentElement.scrollTop = 0;
     // directional motion: forward pushes slide in from the right, back from the left
     const stage = $('#stage');
@@ -4846,6 +4936,7 @@
 
   async function boot() {
     bindGlobal();
+    $('#device').classList.add('on-wallpaper');   // we boot onto home
     applyWallpaper();
     applyTheme();
     applyEffects();

@@ -2856,10 +2856,23 @@ input  { font: inherit; }
   --text-0: #EEF7FD; --text-1: #B9CFDF; --text-2: #7593A9; --text-3: #435B70;
   --edge: inset 0 1px 0 rgba(255, 255, 255, .045);
 }
-/* panels with hardcoded night gradients get daylight equivalents */
-:root[data-ui="light"] #pane {
+/* On HOME the pane and helm sit on the wallpaper (JS toggles .on-wallpaper on
+   #device), so they keep the night ink there even in the light menu theme;
+   everywhere else they follow daylight. */
+:root[data-ui="light"] #device:not(.on-wallpaper) #pane {
   background: linear-gradient(rgba(244, 249, 252, .92), rgba(244, 249, 252, .55));
+  border-bottom-color: var(--line);
 }
+:root[data-ui="light"] #device.on-wallpaper #pane,
+:root[data-ui="light"] #device.on-wallpaper #helm {
+  --text-0: #EEF7FD; --text-1: #B9CFDF; --text-2: #7593A9; --text-3: #435B70;
+  --line: rgba(158, 202, 238, .10); --line-hi: rgba(158, 202, 238, .20);
+  --s1: #0B141F; --s2: #101D2C; --s3: #182A3D;
+}
+:root[data-ui="light"] #device:not(.on-wallpaper) #helm {
+  background: linear-gradient(rgba(244, 249, 252, 0), rgba(233, 241, 248, .6));
+}
+/* panels + widgets with hardcoded night fills get daylight equivalents */
 :root[data-ui="light"] #control {
   background: linear-gradient(180deg, rgba(246, 250, 253, .9), rgba(233, 241, 248, .94));
 }
@@ -2873,27 +2886,112 @@ input  { font: inherit; }
     linear-gradient(180deg, rgba(255, 255, 255, .55), rgba(255, 255, 255, 0) 42%),
     var(--s1);
 }
-:root[data-ui="light"] #helm { background: linear-gradient(rgba(244, 249, 252, .0), rgba(233, 241, 248, .6)); }
+:root[data-ui="light"] .seg { background: rgba(255, 255, 255, .6); }
+:root[data-ui="light"] .tgl,
+:root[data-ui="light"] .slider-block {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .7), rgba(255, 255, 255, .2)),
+    var(--s2);
+}
+:root[data-ui="light"] #toast {
+  background: rgba(252, 254, 255, .92);
+  border-color: var(--line-hi);
+}
+:root[data-ui="light"] .switch { box-shadow: inset 0 1px 3px rgba(25, 45, 65, .18); }
+:root[data-ui="light"] .switch::after { background: #fff; box-shadow: 0 2px 5px rgba(25, 45, 65, .35); }
+:root[data-ui="light"] .pp-input {
+  background: rgba(255, 255, 255, .8); border-color: var(--line-hi); color: var(--text-0);
+}
+:root[data-ui="light"] .pp-item { background: rgba(255, 255, 255, .7); border-color: var(--line); }
+/* "system truth" gradients that were baked white → dark ink in daylight */
+:root[data-ui="light"] .clock-big {
+  background: linear-gradient(180deg, #0A1A27 20%, rgba(44, 69, 87, .85));
+  -webkit-background-clip: text; background-clip: text;
+}
+:root[data-ui="light"] .h2-time {
+  background: linear-gradient(180deg, #0A1A27 20%, rgba(44, 69, 87, .8));
+  -webkit-background-clip: text; background-clip: text;
+}
 
-/* ---- glass level: frosted (airier + more blur) / solid (opaque) ---- */
+/* ---- glass level: frosted = liquid glass (iOS-style) / solid = opaque ----
+   Liquid glass is a recipe, not just blur: a barely-there tinted fill, heavy
+   blur with raised saturation and a touch of brightness (so color from behind
+   bleeds through alive), a luminous top edge, and a soft inner rim light. */
 :root[data-glass="frosted"] .card,
 :root[data-glass="frosted"] .upnext,
-:root[data-glass="frosted"] .home-search {
-  background: color-mix(in srgb, var(--s1) 52%, transparent);
-  -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2);
+:root[data-glass="frosted"] .home-search,
+:root[data-glass="frosted"] .live-ribbon,
+:root[data-glass="frosted"] .tgl,
+:root[data-glass="frosted"] .slider-block,
+:root[data-glass="frosted"] .nt-card,
+:root[data-glass="frosted"] .fx-chip,
+:root[data-glass="frosted"] .clk-chip,
+:root[data-glass="frosted"] .rc-card {
+  background:
+    radial-gradient(120% 90% at 20% -10%, rgba(255, 255, 255, .09), rgba(255, 255, 255, 0) 55%),
+    linear-gradient(160deg, rgba(255, 255, 255, .07), rgba(255, 255, 255, .015) 45%, rgba(255, 255, 255, .05));
+  -webkit-backdrop-filter: blur(28px) saturate(1.85) brightness(1.08);
+  backdrop-filter: blur(28px) saturate(1.85) brightness(1.08);
+  border: 1px solid rgba(255, 255, 255, .14);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .28),
+    inset 0 0 0 .5px rgba(255, 255, 255, .06),
+    inset 0 -12px 24px -18px rgba(255, 255, 255, .12),
+    0 16px 40px -20px rgba(0, 0, 0, .75);
 }
 :root[data-glass="frosted"] #control {
-  -webkit-backdrop-filter: blur(38px) saturate(1.5); backdrop-filter: blur(38px) saturate(1.5);
-  background: linear-gradient(180deg, rgba(10, 18, 28, .55), rgba(5, 9, 15, .6));
-}
-:root[data-glass="frosted"][data-ui="light"] #control {
-  background: linear-gradient(180deg, rgba(246, 250, 253, .6), rgba(233, 241, 248, .65));
+  -webkit-backdrop-filter: blur(40px) saturate(1.9) brightness(1.06);
+  backdrop-filter: blur(40px) saturate(1.9) brightness(1.06);
+  background:
+    radial-gradient(110% 80% at 50% -20%, rgba(255, 255, 255, .08), rgba(255, 255, 255, 0) 60%),
+    rgba(10, 18, 28, .42);
+  border-bottom: 1px solid rgba(255, 255, 255, .16);
 }
 :root[data-glass="frosted"] .prompt-card {
-  -webkit-backdrop-filter: blur(26px); backdrop-filter: blur(26px);
+  -webkit-backdrop-filter: blur(32px) saturate(1.8); backdrop-filter: blur(32px) saturate(1.8);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, 0) 35%),
-    color-mix(in srgb, var(--s1) 62%, transparent);
+    radial-gradient(120% 90% at 20% -10%, rgba(255, 255, 255, .1), rgba(255, 255, 255, 0) 55%),
+    color-mix(in srgb, var(--s1) 45%, transparent);
+  border: 1px solid rgba(255, 255, 255, .16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .3), 0 24px 60px -24px rgba(0, 0, 0, .85);
+}
+:root[data-glass="frosted"] #toast {
+  background: rgba(20, 35, 52, .5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8);
+  border-color: rgba(255, 255, 255, .18);
+}
+/* liquid glass over daylight: milkier fill, same luminous edges */
+:root[data-glass="frosted"][data-ui="light"] .card,
+:root[data-glass="frosted"][data-ui="light"] .upnext,
+:root[data-glass="frosted"][data-ui="light"] .tgl,
+:root[data-glass="frosted"][data-ui="light"] .slider-block,
+:root[data-glass="frosted"][data-ui="light"] .nt-card,
+:root[data-glass="frosted"][data-ui="light"] .fx-chip,
+:root[data-glass="frosted"][data-ui="light"] .clk-chip {
+  background:
+    radial-gradient(120% 90% at 20% -10%, rgba(255, 255, 255, .75), rgba(255, 255, 255, .25) 55%),
+    rgba(255, 255, 255, .35);
+  border: 1px solid rgba(255, 255, 255, .8);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .95),
+    0 16px 40px -22px rgba(25, 45, 65, .45);
+}
+:root[data-glass="frosted"][data-ui="light"] #control {
+  background:
+    radial-gradient(110% 80% at 50% -20%, rgba(255, 255, 255, .8), rgba(255, 255, 255, .2) 60%),
+    rgba(246, 250, 253, .45);
+  border-bottom: 1px solid rgba(255, 255, 255, .85);
+}
+:root[data-glass="frosted"][data-ui="light"] .prompt-card {
+  background:
+    radial-gradient(120% 90% at 20% -10%, rgba(255, 255, 255, .85), rgba(255, 255, 255, .35) 55%),
+    rgba(246, 250, 253, .5);
+  border: 1px solid rgba(255, 255, 255, .85);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .95), 0 24px 60px -24px rgba(25, 45, 65, .5);
+}
+:root[data-glass="frosted"][data-ui="light"] #toast {
+  background: rgba(252, 254, 255, .55);
+  border-color: rgba(255, 255, 255, .85);
 }
 :root[data-glass="solid"] .card,
 :root[data-glass="solid"] .upnext,

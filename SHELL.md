@@ -93,7 +93,10 @@ for real — sensors released, DOM dropped — and *Clear all* sweeps the deck. 
 card whose app holds a sensor wears the sensor's pulsing dot and says so in
 its footer, so the switcher tells the same honest story as the Aura.
 
-**Personalize** (Settings › Personalize) makes it yours, per-device and offline:
+**Personalize** (Settings › Personalize) makes it yours, per-device and offline.
+It is a **hub of sub-pages** — Appearance, Wallpaper, Ambience, Weather,
+Clock &amp; widgets, Icons, Apps &amp; pages — each row showing the current choice at
+a glance. Across them:
 a **wallpaper** picker (nine gradient presets, or any photo from `~/Pictures`),
 a **color theme**, **live effects** (aurora / starfield / drift / rainfall /
 fireflies / match-the-sky / off, with a motion level), **menus &amp; surfaces**
