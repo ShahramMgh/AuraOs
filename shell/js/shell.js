@@ -370,7 +370,14 @@
   ];
   const clockStyle = () => { const s = PREF.get('clockStyle', 'aura'); return CLOCK_STYLES.some(c => c.id === s) ? s : 'aura'; };
   const clockAlign = () => { const a = PREF.get('clockAlign', 'center'); return a === 'left' || a === 'right' ? a : 'center'; };
-  const clockSize  = () => (PREF.get('clockSize', 'regular') === 'large' ? 'large' : 'regular');
+  // Continuous size, not a binary preset: drag the handle in edit mode, or
+  // pick a quick preset in Personalize — both write the same number. Falls
+  // back to the old regular/large preset once, for anyone who set it before.
+  const clockScale = () => {
+    const v = PREF.get('clockScale', null);
+    if (v != null) return Math.max(.7, Math.min(1.8, +v || 1));
+    return PREF.get('clockSize', 'regular') === 'large' ? 1.3 : 1;
+  };
   // Free placement: the clock may also sit lower on the page — a vertical
   // offset in px, set by dragging the clock itself in home edit mode.
   const clockY = () => Math.max(0, Math.min(200, Math.round(+PREF.get('clockY', 0) || 0)));
@@ -406,7 +413,10 @@
   }
   function clockWidgetHTML(st) {
     const style = clockStyle();
-    return `<div id="homeClock" class="clockw cw-${style}" data-style="${style}">${clockInner(style, st.time)}</div>`;
+    return `<div class="clock-widget-wrap">
+      <div id="homeClock" class="clockw cw-${style}" data-style="${style}">${clockInner(style, st.time)}</div>
+      <span class="clk-resize" id="clkResize" aria-hidden="true">${ic('chev', 10)}</span>
+    </div>`;
   }
   // Patch the live clock without rebuilding it (keeps the sheen animation smooth).
   function paintHomeClock(st) {
@@ -548,27 +558,25 @@
     $('#v-home').innerHTML = `
       <div class="home2-aura" aria-hidden="true"></div>
       <div class="home2-body ${S.homeEdit ? 'editing' : ''} ${animate ? 'anim' : ''}">
-        <section class="aura-hero align-${clockAlign()} size-${clockSize()}" style="--clock-dy:${clockY()}px">
+        <section class="aura-hero align-${clockAlign()}" style="--clock-dy:${clockY()}px;--clock-scale:${clockScale()}">
           ${clockWidgetHTML(st)}
           <div class="aura-date">${esc(st.date)} · ${esc(cfg.greeting || greetShort(st.time))}</div>
           <div class="aura-wx" id="homeWx"></div>
           <button class="aura-status" id="auraStatus" data-nav="permissions">${auraStatusHTML()}</button>
         </section>
         <div id="suggestSlot"></div>
-        ${S.homeEdit ? '' : `<div id="upnextSlot"></div>`}
-        ${S.homeEdit ? '' : `<button class="home-search" id="homeSearch">${ic('search',16)}<span>Search apps, files, everything</span></button>`}
+        <div id="upnextSlot"></div>
+        <button class="home-search" id="homeSearch">${ic('search',16)}<span>Search apps, files, everything</span></button>
         ${showFocus ? focusCardHTML(focus, cfg) : ''}
         <div class="home-pager" id="homePager">${pages.map((ps, pi) =>
           `<section class="home-page"><div class="tile-grid" data-page="${pi}">${ps.map(homeTile).join('')}</div></section>`).join('')}</div>
         ${pages.length > 1 ? `<div class="page-dots" id="pageDots">${pages.map((_, pi) =>
           `<button class="pdot ${pi === 0 ? 'on' : ''}" data-pdot="${pi}" aria-label="Page ${pi + 1}"></button>`).join('')}</div>` : ''}
-        ${S.homeEdit
-          ? `<div class="home-edit-bar">
-               <button class="heb-btn" data-hedit="wallpaper">${ic('sun',15)}<span>Wallpaper</span></button>
-               <button class="heb-btn" data-hedit="addpage">${ic('grid',15)}<span>Add page</span></button>
-               <button class="heb-btn done" data-hedit="done">Done</button>
-             </div>`
-          : ''}
+        <div class="home-edit-bar">
+          <button class="heb-btn" data-hedit="wallpaper">${ic('sun',15)}<span>Wallpaper</span></button>
+          <button class="heb-btn" data-hedit="addpage">${ic('grid',15)}<span>Add page</span></button>
+          <button class="heb-btn done" data-hedit="done">Done</button>
+        </div>
         <div style="height:8px"></div>
       </div>`;
 
@@ -577,6 +585,7 @@
     wireHomePager();
     wireHomeEdit();
     wireClockDrag();
+    wireClockResize();
     const hs = $('#homeSearch'); if (hs) hs.onclick = () => openSearch();
     maybeSuggest();   // the resident may gently offer a learned routine (async)
     paintUpNext();    // the next real calendar event, if any (async)
@@ -617,7 +626,7 @@
 
   function homeTile(app, i) {
     const using = Sov.activeSensorsFor(app.id).length ? 'using' : '';
-    const del = S.homeEdit ? `<span class="tile-x" data-hdel="${app.id}" aria-label="Remove">${ic('x', 11)}</span>` : '';
+    const del = `<span class="tile-x" data-hdel="${app.id}" aria-label="Remove">${ic('x', 11)}</span>`;
     // Android apps show their own real icon when we can resolve it; else a glyph.
     const iconUrl = app.android && Sov.appIconUrl ? Sov.appIconUrl('waydroid.' + app.pkg) : null;
     const img = iconUrl ? `<img class="tile-img" src="${iconUrl}" onerror="this.remove()" alt="">` : '';
@@ -640,32 +649,30 @@
       pager.scrollTo({ left: (+d.dataset.pdot) * pager.clientWidth, behavior: 'smooth' }));
   }
 
-  // Home edit mode — iOS/Android-style. Long-press a tile (or the background)
-  // to enter; tiles jiggle, an × removes them, a toolbar adds pages / changes
-  // wallpaper. A quick horizontal move is a page-swipe (we suppress the launch
-  // click), so swipe and drag no longer fight.
+  // Entering edit mode by long-pressing the background (a tile's own
+  // long-press lives in enableTileSort, since there it must hand straight
+  // into a drag on the SAME pointer session — see the big comment there).
+  // This patches the DOM in place (no renderHome) so it's instant and never
+  // fights an in-flight gesture; the edit chrome (tile ×, edit bar, jiggle)
+  // is CSS-driven off `.editing`, already present and already wired below.
+  function enterHomeEditInPlace() {
+    if (S.homeEdit) return;
+    S.homeEdit = true;
+    const body = $('#v-home .home2-body');
+    if (body) body.classList.add('editing');
+  }
+
+  // The edit-mode chrome (delete ×, edit bar) is always in the DOM and always
+  // wired — CSS alone shows/hides it off `.home2-body.editing` — so entering
+  // edit mode never needs to rebuild or rebind anything.
   function wireHomeEdit() {
-    const enter = () => { if (!S.homeEdit) { S.homeEdit = true; renderHome(); } };
-    $$('#homePager .tile').forEach(t => {
-      let sx = 0, sy = 0, moved = false, lp = null;
-      t.addEventListener('pointerdown', e => {
-        moved = false; sx = e.clientX; sy = e.clientY;
-        lp = setTimeout(() => { if (!moved) enter(); }, 480);
-      });
-      t.addEventListener('pointermove', e => {
-        if (!moved && Math.hypot(e.clientX - sx, e.clientY - sy) > 10) { moved = true; clearTimeout(lp); }
-      });
-      t.addEventListener('pointerup', () => clearTimeout(lp));
-      t.addEventListener('pointercancel', () => clearTimeout(lp));
-      t.addEventListener('click', e => { if (moved) { e.preventDefault(); e.stopImmediatePropagation(); } }, true);
-    });
     const pager = $('#homePager');
     if (pager) {
       let px = 0, py = 0, pmoved = false, plp = null;
       pager.addEventListener('pointerdown', e => {
-        if (e.target.closest('.tile')) return;   // tiles own their long-press
+        if (e.target.closest('.tile')) return;   // tiles own their own long-press
         pmoved = false; px = e.clientX; py = e.clientY;
-        plp = setTimeout(() => { if (!pmoved) enter(); }, 480);
+        plp = setTimeout(() => { if (!pmoved) enterHomeEditInPlace(); }, 480);
       });
       pager.addEventListener('pointermove', e => {
         if (Math.hypot(e.clientX - px, e.clientY - py) > 10) { pmoved = true; clearTimeout(plp); }
@@ -673,7 +680,6 @@
       pager.addEventListener('pointerup', () => clearTimeout(plp));
       pager.addEventListener('pointercancel', () => clearTimeout(plp));
     }
-    if (!S.homeEdit) return;
     $$('#v-home [data-hdel]').forEach(x => x.onclick = e => {
       e.stopPropagation(); e.preventDefault();
       const id = x.dataset.hdel;
@@ -713,6 +719,27 @@
         renderHome();
       };
       el.onpointerup = up; el.onpointercancel = up;
+    };
+  }
+
+  // The clock's size handle (bottom-right, edit mode only) — continuous
+  // scale, not a preset. Live-previews via the CSS var while dragging, then
+  // persists and re-renders once, same pattern as the position drag above.
+  function wireClockResize() {
+    const handle = $('#clkResize'), hero = $('.aura-hero');
+    if (!handle || !hero || !S.homeEdit) return;
+    handle.onpointerdown = e => {
+      e.preventDefault(); e.stopPropagation();
+      try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+      const sx = e.clientX, s0 = clockScale();
+      const scaleAt = ev => Math.max(.7, Math.min(1.8, s0 + (ev.clientX - sx) / 160));
+      handle.onpointermove = ev => hero.style.setProperty('--clock-scale', scaleAt(ev).toFixed(3));
+      const up = ev => {
+        handle.onpointermove = handle.onpointerup = handle.onpointercancel = null;
+        PREF.set('clockScale', scaleAt(ev));
+        renderHome();
+      };
+      handle.onpointerup = up; handle.onpointercancel = up;
     };
   }
 
@@ -770,6 +797,39 @@
       }
     }
   }
+  // Speculative pages spun up mid-drag by dragging into a screen edge; pruned
+  // at drop if nothing landed on them, so an idle hover never litters pages.
+  let _dragNewPages = [];
+  function addPageDuringDrag(pos) {
+    if (_dragNewPages.length) return;   // one speculative page per drag is plenty
+    const pager = $('#homePager'); if (!pager) return;
+    const section = document.createElement('section');
+    section.className = 'home-page';
+    section.innerHTML = `<div class="tile-grid" data-page="0"></div>`;
+    if (pos === 'start') pager.insertBefore(section, pager.firstElementChild);
+    else pager.appendChild(section);
+    const grid = section.querySelector('.tile-grid');
+    grid.classList.add('sorting');
+    enableTileSort(grid);
+    _dragNewPages.push(grid);
+    $$('#homePager .tile-grid').forEach((g, i) => { g.dataset.page = i; });
+    const target = pos === 'start' ? 0 : $$('#homePager .tile-grid').length - 1;
+    pager.scrollTo({ left: target * pager.clientWidth, behavior: 'smooth' });
+  }
+  function finalizeHomePagesAfterDrag() {
+    // The common case is a same-page reorder: persist silently and leave the
+    // DOM alone so the tile's own settle transition plays out undisturbed.
+    // Only a page actually being added (or a speculative one pruned away)
+    // needs a full rebuild, for the dots/pager chrome to catch up.
+    const pageCountChanged = _dragNewPages.length > 0;
+    _dragNewPages.forEach(g => { if (!g.children.length) g.closest('.home-page').remove(); });
+    _dragNewPages = [];
+    const grids = $$('#homePager .tile-grid');
+    grids.forEach((g, i) => { g.dataset.page = i; });
+    PREF.set('homePages', grids.map(g => [...g.querySelectorAll('.tile')].map(t => t.dataset.launch)));
+    if (pageCountChanged) renderHome();
+  }
+
   function enableTileSort(grid) {
     if (!grid) return;
     let suppressClick = false;
@@ -777,25 +837,39 @@
     grid.querySelectorAll('.tile').forEach(tile => {
       tile.addEventListener('pointerdown', e => {
         if (e.button) return;
-        if (!S.homeEdit) return;   // drag-to-arrange only in edit mode; else swipe pages freely
-        const start = { x: e.clientX, y: e.clientY }; let started = false, lastEdge = 0;
-        const move = ev => {
+        const start = { x: e.clientX, y: e.clientY };
+        let moved = false, started = false, raf = null, lastEv = null, lastEdge = 0;
+
+        const beginDrag = () => {
+          started = true;
+          _dragNewPages = [];
+          tile.classList.add('dragging');
+          $$('#homePager .tile-grid').forEach(g => g.classList.add('sorting'));
+          try { tile.setPointerCapture(e.pointerId); } catch (_) {}
+        };
+        // One layout-touching pass per animation frame — the old code did
+        // elementFromPoint + getBoundingClientRect on every raw pointermove,
+        // which thrashes layout and is the other half of why drags felt janky.
+        const flush = () => {
+          raf = null;
+          if (!lastEv || !started) return;
+          const ev = lastEv;
           const dx = ev.clientX - start.x, dy = ev.clientY - start.y;
-          if (!started) {
-            if (Math.hypot(dx, dy) < 9) return;      // still a tap
-            started = true;
-            tile.classList.add('dragging');
-            $$('#homePager .tile-grid').forEach(g => g.classList.add('sorting'));
-            try { tile.setPointerCapture(ev.pointerId); } catch (_) {}
-          }
           tile.style.transform = `translate(${dx}px,${dy}px) scale(1.08)`;
-          // near a page edge → glide to the adjacent page so you can drop there
           const pager = $('#homePager');
           if (pager) {
             const pr = pager.getBoundingClientRect(), now = Date.now();
+            const pages = $$('#homePager .tile-grid'), curIdx = pages.indexOf(tile.closest('.tile-grid'));
             if (now - lastEdge > 550) {
-              if (ev.clientX < pr.left + 34) { pager.scrollBy({ left: -pager.clientWidth, behavior: 'smooth' }); lastEdge = now; }
-              else if (ev.clientX > pr.right - 34) { pager.scrollBy({ left: pager.clientWidth, behavior: 'smooth' }); lastEdge = now; }
+              if (ev.clientX > pr.right - 34) {
+                lastEdge = now;
+                if (curIdx === pages.length - 1) addPageDuringDrag('end');
+                pager.scrollBy({ left: pager.clientWidth, behavior: 'smooth' });
+              } else if (ev.clientX < pr.left + 34) {
+                lastEdge = now;
+                if (curIdx === 0) addPageDuringDrag('start');
+                pager.scrollBy({ left: -pager.clientWidth, behavior: 'smooth' });
+              }
             }
           }
           tile.style.pointerEvents = 'none';
@@ -813,25 +887,38 @@
             tile.style.transform = `translate(${dx}px,${dy}px) scale(1.08)`;
           }
         };
+        // In edit mode a small move starts the drag immediately. Not yet in
+        // edit mode, a long-press enters it AND begins the drag on the exact
+        // same pointer session — no lifting and pressing again to continue.
+        let lp = S.homeEdit ? null : setTimeout(() => {
+          if (moved) return;   // already turned into a page-swipe
+          enterHomeEditInPlace();
+          beginDrag();
+        }, 480);
+        const onMove = ev => {
+          if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) > 9) {
+            moved = true; clearTimeout(lp);
+            if (S.homeEdit && !started) beginDrag();
+          }
+          if (!started) return;
+          lastEv = ev;
+          if (!raf) raf = requestAnimationFrame(flush);
+        };
         const up = () => {
-          tile.removeEventListener('pointermove', move);
+          clearTimeout(lp);
+          tile.removeEventListener('pointermove', onMove);
           window.removeEventListener('pointerup', up);
+          if (raf) { cancelAnimationFrame(raf); raf = null; }
           if (!started) return;
           tile.classList.remove('dragging');
           $$('#homePager .tile-grid').forEach(g => g.classList.remove('sorting'));
           tile.style.transition = 'transform .18s var(--ease)';
           tile.style.transform = '';
           setTimeout(() => { tile.style.transition = ''; }, 200);
-          // persist every page (a drag may have moved the tile across pages)
-          const pgs = homePagesIds().slice();
-          $$('#homePager .tile-grid').forEach(g => {
-            const pi = parseInt(g.dataset.page, 10);
-            if (!isNaN(pi)) pgs[pi] = [...g.querySelectorAll('.tile')].map(t => t.dataset.launch);
-          });
-          PREF.set('homePages', pgs);
+          finalizeHomePagesAfterDrag();   // persists every page; drops an empty speculative one
           suppressClick = true; setTimeout(() => { suppressClick = false; }, 80);
         };
-        tile.addEventListener('pointermove', move);
+        tile.addEventListener('pointermove', onMove);
         window.addEventListener('pointerup', up);
       });
     });
@@ -3694,11 +3781,11 @@
           <div class="seg">${['left','center','right'].map(a =>
             `<button class="${a === clockAlign() ? 'on acc' : ''}" data-clkalign="${a}">${cap(a)}</button>`).join('')}</div></div>
         <div class="row"><span class="glyph">${ic('sun',18)}</span>
-          <span class="rtext"><div class="rtitle">Size</div><div class="rsub">How large it sits on home</div></span>
-          <div class="seg">${['regular','large'].map(z =>
-            `<button class="${z === clockSize() ? 'on acc' : ''}" data-clksize="${z}">${cap(z)}</button>`).join('')}</div></div>
-        ${clockY() ? `<button class="row tappable" data-clkreset style="width:100%;text-align:left"><span class="glyph">${ic('restart',18)}</span>
-          <span class="rtext"><div class="rtitle">Reset height</div><div class="rsub">The clock sits ${clockY()}px lower — put it back at the top</div></span></button>` : ''}
+          <span class="rtext"><div class="rtitle">Size</div><div class="rsub">Or drag its corner handle while editing home</div></span>
+          <div class="seg">${[['small',.85],['regular',1],['large',1.3]].map(([n,v]) =>
+            `<button class="${Math.abs(clockScale()-v)<.03 ? 'on acc' : ''}" data-clkscale="${v}">${cap(n)}</button>`).join('')}</div></div>
+        ${clockY() || PREF.get('clockScale', null) ? `<button class="row tappable" data-clkreset style="width:100%;text-align:left"><span class="glyph">${ic('restart',18)}</span>
+          <span class="rtext"><div class="rtitle">Reset position &amp; size</div><div class="rsub">Put the clock back where it started</div></span></button>` : ''}
       </div>
       <div class="section-head"><span class="eyebrow">Home widgets</span>
         <span class="muted" style="font-size:11px">real data, or nothing at all</span></div>
@@ -3724,11 +3811,13 @@
     $('#screenScroll').querySelectorAll('[data-clkalign]').forEach(b => b.onclick = () => {
       PREF.set('clockAlign', b.dataset.clkalign); renderPzClock();
     });
-    $('#screenScroll').querySelectorAll('[data-clksize]').forEach(b => b.onclick = () => {
-      PREF.set('clockSize', b.dataset.clksize); renderPzClock();
+    $('#screenScroll').querySelectorAll('[data-clkscale]').forEach(b => b.onclick = () => {
+      PREF.set('clockScale', +b.dataset.clkscale); renderPzClock();
     });
     const ckr = $('#screenScroll').querySelector('[data-clkreset]');
-    if (ckr) ckr.onclick = () => { PREF.set('clockY', 0); renderPzClock(); toast('Clock back at the top', 'ok', 'check'); };
+    if (ckr) ckr.onclick = () => {
+      PREF.set('clockY', 0); PREF.set('clockScale', null); renderPzClock(); toast('Clock reset', 'ok', 'check');
+    };
     const unx = $('#screenScroll').querySelector('[data-upnexttgl]');
     if (unx) unx.onclick = () => { PREF.set('upnext', !PREF.get('upnext', true)); renderPzClock(); };
     const ltt = $('#screenScroll').querySelector('[data-livetermtgl]');

@@ -599,23 +599,34 @@ input  { font: inherit; }
 }
 .cw-words .cl-words::first-line { color: #fff; }
 .aura-hero.align-center .cw-words .cl-words { text-align: center; }
-/* Size — a bigger clock widget without reflowing the rest */
-.aura-hero.size-large .clockw { transform: scale(1.16); margin: 10px 0 18px; }
-.aura-hero.size-large.align-left .clockw { transform-origin: left center; }
-.aura-hero.size-large.align-right .clockw { transform-origin: right center; }
-/* Free placement — right alignment + a vertical offset (drag it in edit mode) */
-.aura-hero .clockw { margin-top: var(--clock-dy, 0px); }
-.aura-hero.size-large .clockw { margin-top: calc(10px + var(--clock-dy, 0px)); }
+/* Size — a continuous scale (drag the corner handle in edit mode, or a
+   Personalize preset), not a fixed "large" step. Grows without reflowing
+   the rest of home; a little extra top margin as it grows for breathing room. */
+.clock-widget-wrap { position: relative; display: inline-block; }
+.clockw {
+  transform: scale(var(--clock-scale, 1));
+  margin-top: calc(var(--clock-dy, 0px) + (var(--clock-scale, 1) - 1) * 40px);
+}
+.aura-hero.align-left .clockw { transform-origin: left center; }
+.aura-hero.align-right .clockw { transform-origin: right center; }
 .aura-hero.align-right { align-items: flex-end; text-align: right; padding-right: 6px; }
 .aura-hero.align-right .aura-status { align-self: flex-end; }
 .aura-hero.align-right .cw-stacked { align-items: flex-end; }
 .aura-hero.align-right .cw-words .cl-words { text-align: right; }
-/* in edit mode the clock reads as a draggable widget */
+/* in edit mode the clock reads as a draggable, resizable widget */
 .home2-body.editing .clockw {
   cursor: grab; touch-action: none; border-radius: 14px;
   outline: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 10px;
 }
 .home2-body.editing .clockw:active { cursor: grabbing; }
+.clk-resize {
+  display: none; position: absolute; right: -8px; bottom: 4px;
+  width: 24px; height: 24px; border-radius: 50%; align-items: center; justify-content: center;
+  color: var(--text-2); background: color-mix(in srgb, var(--accent) 18%, var(--s1));
+  border: 1px solid var(--line-hi); box-shadow: var(--shadow-1);
+  cursor: nwse-resize; touch-action: none; transform: rotate(45deg);
+}
+.home2-body.editing .clk-resize { display: flex; }
 
 /* Personalize — clock style picker */
 .clk-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
@@ -2709,11 +2720,22 @@ input  { font: inherit; }
 .home2-body.editing .tile:nth-child(2n) { animation-delay: -.16s; }
 .home2-body.editing .tile:nth-child(3n) { animation-delay: -.08s; }
 @keyframes tilejiggle { 0%, 100% { transform: rotate(-1.3deg); } 50% { transform: rotate(1.3deg); } }
-.tile-x { position: absolute; top: -3px; left: 50%; margin-left: -30px; width: 20px; height: 20px;
-  border-radius: 50%; display: flex; align-items: center; justify-content: center; z-index: 3;
+/* A dragged tile is hand-positioned via inline transform every frame — the
+   jiggle keyframes must yield or the two fight over `transform` and the tile
+   stutters/rotates under your finger. This was the main cause of janky drags. */
+.tile.dragging { animation: none; will-change: transform; }
+.tile.dragging .tile-ic { transition: none; }
+/* Always in the DOM, always wired — .editing alone reveals them, so entering
+   edit mode is a single class toggle with no rebuild (enterHomeEditInPlace). */
+.tile-x { display: none; position: absolute; top: -3px; left: 50%; margin-left: -30px; width: 20px; height: 20px;
+  border-radius: 50%; align-items: center; justify-content: center; z-index: 3;
   background: var(--s3); color: var(--text-0); border: 1px solid var(--line); box-shadow: 0 2px 6px rgba(0, 0, 0, .4); }
+.home2-body.editing .tile-x { display: flex; }
 .tile-x:active { transform: scale(.9); }
-.home-edit-bar { display: flex; gap: 8px; align-items: center; justify-content: center; margin: 16px 8px 4px; }
+.home-edit-bar { display: none; gap: 8px; align-items: center; justify-content: center; margin: 16px 8px 4px; }
+.home2-body.editing .home-edit-bar { display: flex; }
+#upnextSlot:empty, .home2-body.editing #upnextSlot { display: none; }
+.home2-body.editing .home-search { display: none; }
 .heb-btn { display: flex; align-items: center; gap: 6px; padding: 9px 14px; border-radius: 12px; font-size: 12px;
   color: var(--text-1); background: var(--glass); border: 1px solid var(--line);
   -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }

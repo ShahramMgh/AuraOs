@@ -106,17 +106,22 @@ glass / solid, solid being fully opaque for maximum legibility; and an
 adjustable **wallpaper-contrast** fill, 0–70% dark, layered between the
 wallpaper and the content of home &amp; lock so text and icons stay visible on a
 light image), a **home clock widget** (six styles,
-two sizes — and free placement: drag the clock itself while editing home, or
-pick left/center/right here), **home widgets** (an **Up next** card showing the
-next real calendar event — hidden when nothing is scheduled, never faked), an
-**icon pack** (squircle / round / sharp shapes, labels on or off), a **home
-focus** chooser (which app is the hero card), and **home pages** — assign each
-app to one of several swipeable pages (Android/iOS style) or take it off home.
+continuous size — drag its corner handle while editing home, or pick a preset
+here — and free placement: drag the clock itself, or pick left/center/right),
+**home widgets** (an **Up next** card showing the next real calendar event —
+hidden when nothing is scheduled, never faked), an **icon pack** (squircle /
+round / sharp shapes, labels on or off), a **home focus** chooser (which app is
+the hero card), and **home pages** — assign each app to one of several
+swipeable pages (Android/iOS style) or take it off home.
 On the home screen you **swipe between pages** (dots track your position) and
-**drag tiles to rearrange them** — a tap still launches, a drag reorders
-(smooth FLIP) and it all persists. These are stored as device-local prefs
-(`localStorage`); when the AI Engine proposes a layout in Phase II, the user's
-own choice wins.
+**drag tiles to rearrange them** — a tap still launches, a long-press flows
+directly into a drag on the very same gesture (no lift-and-press-again),
+reorders with a smooth FLIP animation, and it all persists. **Drag a tile to
+the screen edge** and the pager glides to the next page to drop it there — at
+the very first or very last page, holding on the edge **spins up a new page**
+to receive it, pruned automatically if you back off without dropping anything.
+These are stored as device-local prefs (`localStorage`); when the AI Engine
+proposes a layout in Phase II, the user's own choice wins.
 
 **Live services** (Personalize, off by default — the toggle is the plain-language
 consent, and all egress goes through the agent, never straight from the shell):
