@@ -19,6 +19,7 @@
     homeEdit: false,      // iOS/Android-style home edit mode (long-press to enter)
     pendingNote: null,    // a note to open on the next Notes render (deep search)
     pendingBrowse: null,  // a query/URL to open on the next Browser open (search)
+    pendingQuery: null,   // a query to pre-fill the drawer search (AI search action)
     focusSearch: false,   // focus the search field on the next drawer render
   };
 
@@ -943,6 +944,7 @@
   function openSearch() { S.focusSearch = true; go('drawer'); }
 
   async function renderDrawer(filter = '') {
+    if (S.pendingQuery != null) { filter = S.pendingQuery; S.pendingQuery = null; S.focusSearch = true; }
     if (INSTALLED === null) {
       INSTALLED = [];
       const caps = await Sov.capabilities();
@@ -2691,6 +2693,11 @@
     open_settings:    { icon: 'gear',  verb: a => `Open ${String(a.screen || 'settings')} settings` },
     create_note:      { icon: 'note',  verb: () => `Save a note` },
     lock_device:      { icon: 'lock',  verb: () => `Lock the device` },
+    create_event:     { icon: 'calendar', verb: a => `Add “${cap(String(a.title || 'event'))}”${a.date ? ' · ' + a.date : ''}${a.time ? ' ' + a.time : ''}` },
+    send_sms:         { icon: 'msg',   verb: a => `Text ${cap(String(a.to || 'someone'))}${a.text ? ': “' + String(a.text).slice(0, 40) + '”' : ''}` },
+    call_contact:     { icon: 'phone', verb: a => `Call ${cap(String(a.to || 'someone'))}` },
+    search:           { icon: 'search',verb: a => `Search for “${String(a.query || '')}”` },
+    web_search:       { icon: 'browser', verb: a => `Search the web for “${String(a.query || '')}”` },
   };
   const SETTINGS_ROUTE = { wifi: 'sys-wifi', display: 'sys-display', sound: 'sys-sound',
     permissions: 'permissions', network: 'network', about: 'sys-about',
@@ -2805,8 +2812,48 @@
       case 'open_settings':  { go(SETTINGS_ROUTE[String(a.screen || '').toLowerCase()] || 'settings'); return { desc }; }
       case 'create_note':    { await Sov.notes.save('', a.text || ''); return { desc }; }
       case 'lock_device':    { lockDevice(); return { desc }; }
+      case 'create_event': {
+        const date = normalizeDate(a.date);
+        const events = await Sov.calendar.op('add', { title: a.title || 'Event', date, time: a.time || '' });
+        _srch = null;                                   // refresh deep-search cache
+        const added = events && events[events.length - 1];
+        return { desc: `Add “${a.title || 'event'}”`, undo: added ? () => Sov.calendar.op('delete', { id: added.id }) : null };
+      }
+      case 'send_sms': {
+        const c = await resolveContact(a.to); const num = c ? c.number : a.to;
+        if (!num || !a.text) return { desc: null };
+        await Sov.sms.send(num, a.text);
+        return { desc: `Text ${c ? c.name : num}` };
+      }
+      case 'call_contact': {
+        const c = await resolveContact(a.to); const num = c ? c.number : a.to;
+        if (!num) return { desc: null };
+        await Sov.phone.dial(num);
+        return { desc: `Call ${c ? c.name : num}` };
+      }
+      case 'search':     { S.pendingQuery = a.query || ''; go('drawer'); return { desc: `Search for “${a.query || ''}”` }; }
+      case 'web_search': { S.pendingBrowse = a.query || ''; launch('browser'); return { desc: `Search the web for “${a.query || ''}”` }; }
     }
     return { desc: null };
+  }
+
+  // Resolve a contact name (or a raw number) to a stored contact, for the AI's
+  // send_sms / call_contact actions.
+  async function resolveContact(nameOrNumber) {
+    const q = String(nameOrNumber || '').trim().toLowerCase();
+    if (!q) return null;
+    const list = await Sov.contacts.list();
+    return list.find(c => (c.name || '').toLowerCase() === q)
+      || list.find(c => (c.name || '').toLowerCase().includes(q)) || null;
+  }
+  // Normalize an AI-supplied date to YYYY-MM-DD (accepts today/tomorrow too).
+  function normalizeDate(d) {
+    const s = String(d || '').trim().toLowerCase();
+    const iso = n => { const dt = new Date(); dt.setDate(dt.getDate() + n); return dt.toISOString().slice(0, 10); };
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    if (s === 'tomorrow') return iso(1);
+    if (s === 'today' || !s) return iso(0);
+    return iso(0);
   }
 
   // ---- proactive suggestion on the home screen --------------------------

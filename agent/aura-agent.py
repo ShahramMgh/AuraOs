@@ -327,7 +327,7 @@ def situation():
     b = read_battery()
     net = cached("net", 4, read_net)
     sysd = cached("sys", 3, read_system)
-    parts = [time.strftime("it is %H:%M on %A %-d %B")]
+    parts = [time.strftime("it is %H:%M on %A %-d %B (today's date is %Y-%m-%d)")]
     parts.append(f"battery {b['level']}%" + (", charging" if b["charging"] else ", on battery"))
     if net.get("airplane"):
         parts.append("airplane mode is on")

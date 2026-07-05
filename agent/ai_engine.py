@@ -100,6 +100,23 @@ CAPABILITIES = [
     {"id": "lock_device", "title": "Lock the device", "affects": ["system"], "reversible": False,
      "desc": "Lock the device screen.",
      "args": {}, "required": []},
+    {"id": "create_event", "title": "Add a calendar event", "affects": ["calendar"], "reversible": True,
+     "desc": "Add an event to the calendar. Use the current date from context to compute 'date' as "
+             "YYYY-MM-DD; 'time' is HH:MM in 24-hour form (optional).",
+     "args": {"title": {"type": "string"}, "date": {"type": "string", "desc": "YYYY-MM-DD"},
+              "time": {"type": "string", "desc": "HH:MM 24h, optional"}}, "required": ["title", "date"]},
+    {"id": "send_sms", "title": "Send a text message", "affects": ["messages", "network"], "reversible": False,
+     "desc": "Send an SMS. 'to' is a contact name or a phone number; 'text' is the message body.",
+     "args": {"to": {"type": "string"}, "text": {"type": "string"}}, "required": ["to", "text"]},
+    {"id": "call_contact", "title": "Call someone", "affects": ["phone"], "reversible": False,
+     "desc": "Place a phone call. 'to' is a contact name or a phone number.",
+     "args": {"to": {"type": "string"}}, "required": ["to"]},
+    {"id": "search", "title": "Search the device", "affects": ["apps"], "reversible": False,
+     "desc": "Search across apps, contacts, notes, files, music and photos for a query.",
+     "args": {"query": {"type": "string"}}, "required": ["query"]},
+    {"id": "web_search", "title": "Search the web", "affects": ["apps", "network"], "reversible": False,
+     "desc": "Open the browser and search the web for a query.",
+     "args": {"query": {"type": "string"}}, "required": ["query"]},
 ]
 CAP_BY_ID = {c["id"]: c for c in CAPABILITIES}
 
@@ -111,6 +128,9 @@ _VERB = {
     "play_music": "plays music", "toggle_wifi": "toggles Wi-Fi",
     "toggle_bluetooth": "toggles Bluetooth", "open_settings": "opens a settings screen",
     "create_note": "writes a note", "lock_device": "locks the phone",
+    "create_event": "adds a calendar event", "send_sms": "sends a text",
+    "call_contact": "makes a call", "search": "searches the device",
+    "web_search": "searches the web",
 }
 
 SYSTEM_PROMPT = (
