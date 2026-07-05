@@ -2328,3 +2328,26 @@ input  { font: inherit; }
   color: var(--text-2); font-size: 13px; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 .home-search svg { flex: 0 0 auto; }
 .home-search:active { border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--text-1); }
+
+/* ── The Aura orb + its radial menu ──────────────────────────────────────── */
+.home-orb { position: relative; overflow: visible; }
+.home-orb::after { display: none; }              /* the Aura canvas is the orb's light now */
+.orb-aura { position: absolute; inset: 0; width: 100%; height: 100%; display: block; border-radius: 50%; }
+#radial { position: absolute; inset: 0; z-index: 84; pointer-events: none; }
+#radial.open { pointer-events: auto; }
+.rad-scrim { position: absolute; inset: 0; background: rgba(4, 7, 12, .34);
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); animation: fade .2s; }
+.rad-opt { position: absolute; left: 50%; bottom: calc(var(--helm-h) * .5); width: 58px; opacity: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  transform: translate(calc(-50% + var(--dx)), var(--dy)); animation: radIn .22s var(--ease) forwards; }
+@keyframes radIn {
+  from { transform: translate(-50%, calc(var(--dy) * .35)) scale(.5); opacity: 0; }
+  to   { transform: translate(calc(-50% + var(--dx)), var(--dy)) scale(1); opacity: 1; } }
+.rad-ic { width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  color: var(--text-1); background: var(--glass); border: 1px solid var(--line);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: 0 6px 18px rgba(0, 0, 0, .34);
+  transition: transform .14s var(--ease), background .14s, color .14s, box-shadow .14s; }
+.rad-lbl { font-size: 10px; color: var(--text-2); }
+.rad-opt.sel .rad-ic { color: #04121a; background: var(--accent); border-color: transparent; transform: scale(1.16);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 28%, transparent), 0 10px 24px -6px var(--accent); }
+.rad-opt.sel .rad-lbl { color: var(--text-0); }

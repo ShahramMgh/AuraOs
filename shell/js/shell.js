@@ -121,9 +121,10 @@
     <div id="control"><div class="ctl-inner"><div class="ctl-grip"></div><div id="controlBody"></div></div></div>
     <div id="helm">
       <button class="helm-back" id="helmBack">${ic('back',20)}<span>Back</span></button>
-      <button class="home-orb" id="homeOrb" aria-label="Home"></button>
+      <button class="home-orb" id="homeOrb" aria-label="Home"><canvas class="orb-aura" id="orbAura"></canvas></button>
       <button class="helm-activity" id="helmAct"><span class="actcount" id="actCount">0</span></button>
     </div>
+    <div id="radial"></div>
     <div id="appframe"></div>
     <div id="insScrim"></div>
     <div id="insight" class="side-left hidden"></div>
@@ -280,7 +281,6 @@
       <div class="home2-aura" aria-hidden="true"></div>
       <div class="home2-body ${S.homeEdit ? 'editing' : ''}">
         <section class="aura-hero">
-          <canvas class="aura-canvas" id="auraCanvas" aria-label="Aura — your on-device companion"></canvas>
           <div class="aura-time" id="homeClock">${st.time}</div>
           <div class="aura-date">${esc(st.date)} · ${esc(cfg.greeting || greetShort(st.time))}</div>
           <button class="aura-status" id="auraStatus" data-nav="permissions">${auraStatusHTML()}</button>
@@ -307,7 +307,6 @@
     wireHomePager();
     wireHomeEdit();
     const hs = $('#homeSearch'); if (hs) hs.onclick = () => openSearch();
-    mountAura();
     maybeSuggest();   // the resident may gently offer a learned routine (async)
   }
 
@@ -319,9 +318,12 @@
     const cls = kinds.includes('cam') ? 'cam' : kinds.includes('mic') ? 'mic' : 'loc';
     return `<span class="as-dot ${cls}"></span><span>${esc(kinds.map(k => label[k]).join(' · '))} in use right now</span>`;
   }
+  // The Aura now lives in the home orb — a persistent companion in the helm,
+  // present on every screen. The orb handles its own taps (tap = home,
+  // long-press = the radial menu), so the Aura is mounted for its light only.
   function mountAura() {
-    const cvs = $('#auraCanvas'); if (!cvs || typeof Aura === 'undefined') return;
-    Aura.mount(cvs, { onTap: () => { if (!S.locked && S.view === 'home' && !S.appOpen) launch('assistant'); } });
+    const cvs = $('#orbAura'); if (!cvs || typeof Aura === 'undefined') return;
+    Aura.mount(cvs, {});
     Aura.setSensors(activeSensorKinds());
   }
 
@@ -3277,7 +3279,6 @@
 
   function go(view, { push = true } = {}) {
     clearScreenTimer();
-    if (S.view === 'home' && view !== 'home' && typeof Aura !== 'undefined') Aura.stop();
     if (S.appOpen) closeAppFrame(true);
     if (view === S.view) { /* re-render */ }
     else if (push && S.view !== view) S.history.push(S.view);
@@ -3483,7 +3484,6 @@
     af.classList.remove('closing');
     af.classList.add('open');
     requestAnimationFrame(() => af.classList.add('shown'));   // animate up + in
-    if (typeof Aura !== 'undefined') Aura.stop();             // home is covered
     updateHelm();
     updateInsight();   // margin now reflects THIS app's access, net, resources
   }
@@ -3896,6 +3896,7 @@
   function unlockDevice() {
     S.locked = false;
     $('#lock').classList.add('hidden');
+    if (typeof Aura !== 'undefined') Aura.start();   // wake the orb Aura
     goHome();
     updateInsight();   // reveal the margin once we're past the lock screen
   }
@@ -3921,11 +3922,12 @@
     renderPane(st);
     batteryWatch(st);
     updateHelm();
+    // the orb Aura reflects live sensor use on every screen
+    if (!S.locked && typeof Aura !== 'undefined') Aura.setSensors(activeSensorKinds());
     // refresh the honest surfaces if visible — patch in place, don't rebuild
     if (!S.locked && S.view === 'home' && !S.appOpen) {
       const clk = $('#homeClock'); if (clk) clk.textContent = st.time;
       const as = $('#auraStatus'); if (as) as.innerHTML = auraStatusHTML();
-      if (typeof Aura !== 'undefined') Aura.setSensors(activeSensorKinds());
       bindHome();
       $$('#v-home [data-launch]').forEach(el =>
         el.classList.toggle('using', Sov.activeSensorsFor(el.dataset.launch).length > 0));
@@ -3941,7 +3943,7 @@
      GESTURES + GLOBAL BINDINGS
      ====================================================================== */
   function bindGlobal() {
-    $('#homeOrb').onclick = () => { if (S.locked) return; goHome(); };
+    // #homeOrb is driven by wireOrb() (tap = home, long-press = radial menu).
     $('#helmBack').onclick = () => { if (!S.locked) back(); };
     $('#helmAct').onclick = () => { if (!S.locked) toggleActivity(); };
 
@@ -3969,15 +3971,19 @@
     // the whole thing feel like a phone. A mostly-vertical swipe of 70px+ that
     // starts in the bottom strip goes home (works over any screen or app).
     let gy = null, gx = null;
-    const gStart = (x, y) => { if (S.locked || S.controlOpen) return; if (y >= window.innerHeight - 48) { gx = x; gy = y; } };
+    const gStart = (x, y, target) => {
+      if (S.locked || S.controlOpen || _radialOpen) return;
+      if (target && target.closest && target.closest('#helm')) return;   // orb owns helm gestures
+      if (y >= window.innerHeight - 48) { gx = x; gy = y; }
+    };
     const gMove = (x, y) => {
-      if (gy == null) return;
+      if (gy == null || _radialOpen) return;
       if (gy - y > 70) { const dx = Math.abs(x - gx); gy = null; if (dx < 100) goHome(); }
     };
-    window.addEventListener('touchstart', e => gStart(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
+    window.addEventListener('touchstart', e => gStart(e.touches[0].clientX, e.touches[0].clientY, e.target), { passive: true });
     window.addEventListener('touchmove', e => gMove(e.touches[0].clientX, e.touches[0].clientY), { passive: true });
     window.addEventListener('touchend', () => { gy = null; });
-    window.addEventListener('mousedown', e => gStart(e.clientX, e.clientY));
+    window.addEventListener('mousedown', e => gStart(e.clientX, e.clientY, e.target));
     window.addEventListener('mousemove', e => { if (e.buttons) gMove(e.clientX, e.clientY); });
     window.addEventListener('mouseup', () => { gy = null; });
     // tapping the pane also opens the matching panel (discoverable for mouse users)
@@ -4097,6 +4103,71 @@
     }, 8000);
   }
 
+  /* ======================================================================
+     THE ORB — the Aura's home. A tap goes home; a long-press opens a radial
+     menu you drag the Aura to (Assistant · Search · Apps · Recents), or tap.
+     ====================================================================== */
+  const RADIAL = [
+    { label: 'Assistant', icon: 'spark',  run: () => launch('assistant') },
+    { label: 'Search',    icon: 'search', run: () => openSearch() },
+    { label: 'Apps',      icon: 'grid',   run: () => go('drawer') },
+    { label: 'Recents',   icon: 'layers', run: () => toggleActivity() },
+  ];
+  const RADIAL_POS = [[-80, -46], [-28, -84], [28, -84], [80, -46]];
+  let _radialOpen = false, _radialSel = -1, _orbLP = null;
+
+  function openRadial() {
+    _radialOpen = true; _radialSel = -1;
+    const rad = $('#radial'); if (!rad) return;
+    rad.innerHTML = `<div class="rad-scrim"></div>` + RADIAL.map((o, i) =>
+      `<button class="rad-opt" data-ro="${i}" style="--dx:${RADIAL_POS[i][0]}px;--dy:${RADIAL_POS[i][1]}px">
+         <span class="rad-ic">${ic(o.icon, 20)}</span><span class="rad-lbl">${esc(o.label)}</span></button>`).join('');
+    rad.classList.add('open');
+    rad.querySelector('.rad-scrim').onclick = () => closeRadial(false);
+    rad.querySelectorAll('[data-ro]').forEach(b => b.onclick = () => { _radialSel = +b.dataset.ro; closeRadial(true); });
+    if (typeof Aura !== 'undefined') Aura.bloom();
+  }
+  function closeRadial(trigger) {
+    const rad = $('#radial'); if (!rad) return;
+    if (trigger && _radialSel >= 0 && RADIAL[_radialSel]) RADIAL[_radialSel].run();
+    _radialOpen = false; _radialSel = -1;
+    rad.classList.remove('open');
+    setTimeout(() => { if (!_radialOpen) rad.innerHTML = ''; }, 220);
+  }
+  function radialSelect(x, y) {
+    const orb = $('#homeOrb').getBoundingClientRect();
+    const cx = orb.left + orb.width / 2, cy = orb.top + orb.height / 2;
+    let best = -1, bestD = 1e9;
+    RADIAL_POS.forEach((p, i) => { const d = Math.hypot(x - (cx + p[0]), y - (cy + p[1])); if (d < bestD) { bestD = d; best = i; } });
+    _radialSel = (Math.hypot(x - cx, y - cy) > 24 && bestD < 74) ? best : -1;
+    $$('#radial .rad-opt').forEach((el, i) => el.classList.toggle('sel', i === _radialSel));
+    if (typeof Aura !== 'undefined' && _radialSel >= 0) Aura.attend();
+  }
+  function wireOrb() {
+    const orb = $('#homeOrb'); if (!orb) return;
+    let sx = 0, sy = 0, longPressed = false, downAt = 0;
+    orb.addEventListener('pointerdown', e => {
+      if (S.locked) return;
+      sx = e.clientX; sy = e.clientY; longPressed = false; downAt = Date.now();
+      try { orb.setPointerCapture(e.pointerId); } catch (_) {}
+      if (typeof Aura !== 'undefined') Aura.bloom();
+      clearTimeout(_orbLP);
+      _orbLP = setTimeout(() => { longPressed = true; openRadial(); }, 300);
+    });
+    orb.addEventListener('pointermove', e => {
+      if (longPressed) { radialSelect(e.clientX, e.clientY); return; }
+      if (Math.hypot(e.clientX - sx, e.clientY - sy) > 16) clearTimeout(_orbLP);   // a swipe, not a hold
+    });
+    const end = () => {
+      clearTimeout(_orbLP);
+      if (_radialOpen) { if (_radialSel >= 0) closeRadial(true); /* else keep open to tap */ }
+      else if (!longPressed && Date.now() - downAt < 500) goHome();   // a tap
+      longPressed = false;
+    };
+    orb.addEventListener('pointerup', end);
+    orb.addEventListener('pointercancel', () => { clearTimeout(_orbLP); if (_radialOpen) closeRadial(false); longPressed = false; });
+  }
+
   async function boot() {
     bindGlobal();
     applyWallpaper();
@@ -4108,11 +4179,14 @@
     document.addEventListener('visibilitychange', () => {
       if (typeof Aura === 'undefined') return;
       if (document.hidden) Aura.stop();
-      else if (!S.locked && S.view === 'home' && !S.appOpen) Aura.start();
+      else if (!S.locked) Aura.start();   // the orb Aura runs on every screen
     });
     renderLock();
     renderPane(Sov.get());
     buildInsight();                      // the left privacy/status margin
+    mountAura();                         // the Aura lives in the home orb, persistently
+    wireOrb();                           // tap = home · long-press = radial menu
+    if (S.locked && typeof Aura !== 'undefined') Aura.stop();
     startModemWatch();                   // incoming call/SMS → notifications (live)
     HOME_CFG = await Sov.homeConfig();   // load the layout config before first home render
     await Sov._probe();
