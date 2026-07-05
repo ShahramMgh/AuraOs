@@ -82,6 +82,17 @@ full **A–Z icon grid is one tap away** in the
 app drawer ("All apps"). The only motion is a slow background aura, which honours
 `prefers-reduced-motion`.
 
+**Recents** (the helm's right button, or the orb's radial menu) is a real task
+switcher: every backgrounded session is a swipeable card carrying a **miniature
+of the app's actual last screen** — a sanitized snapshot of its own DOM, taken
+as it leaves the foreground (ids stripped, iframes neutralized, fully inert; no
+screenshots, nothing rendered off-device). **Tap a card to bring that session
+back** exactly where you left it (the foreground app resumes its live DOM; a
+torn-down one relaunches through the normal permission flow), the **×** ends it
+for real — sensors released, DOM dropped — and *Clear all* sweeps the deck. A
+card whose app holds a sensor wears the sensor's pulsing dot and says so in
+its footer, so the switcher tells the same honest story as the Aura.
+
 **Personalize** (Settings › Personalize) makes it yours, per-device and offline:
 a **wallpaper** picker (nine gradient presets, or any photo from `~/Pictures`),
 a **color theme**, **live effects** (aurora / starfield / drift / rainfall /

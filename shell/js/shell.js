@@ -147,6 +147,7 @@
     </div>
     <div id="radial"></div>
     <div id="appframe"></div>
+    <div id="recents"></div>
     <div id="insScrim"></div>
     <div id="insight" class="side-left hidden"></div>
     <div id="promptScrim"></div>
@@ -3633,12 +3634,14 @@
   function goHome() {
     S.history = [];
     closeControl();
+    if (S.recentsOpen) closeRecents();
     if (S.homeEdit) S.homeEdit = false;   // the home button also finishes editing
     if (S.appOpen) closeAppFrame(true);
     go('home', { push: false });
   }
 
   function back() {
+    if (S.recentsOpen)  return closeRecents();
     if (S.controlOpen) return closeControl();
     if (S.appOpen)     return closeAppFrame();
     const prev = S.history.pop();
@@ -3784,6 +3787,7 @@
   // (Close from recents) stops its camera/audio and releases sensors.
   let _frameApp = null;
   function teardownFrameDom() {
+    snapApp();   // keep a card-sized memory of the screen for recents
     const view = _frameApp && APP_VIEWS[_frameApp];
     if (view && view.close) { try { view.close(); } catch (e) {} }
     $('#appframe').innerHTML = '';
@@ -3820,6 +3824,7 @@
     // Background (don't destroy): the frame hides but its DOM + state live on, so
     // reopening resumes. Sensors keep running in the background (honest) —
     // teardown only happens on a real Close (recents) or a permission cut-off.
+    snapApp();   // its recents card shows the screen as you left it
     const af = $('#appframe');
     af.classList.remove('shown');
     af.classList.add('closing');
@@ -4343,37 +4348,111 @@
     });
   }
 
+  /* Recents — a real task switcher. Each running session is a swipeable card
+     carrying a miniature of the app's actual last screen (a sanitized snapshot
+     of its live DOM, taken when it goes to the background — no screenshots, no
+     canvas tricks, nothing leaves the shell). Tap a card to bring that session
+     back to the foreground; × ends it for real (sensors released, DOM dropped). */
+  const _shots = {};   // appId → sanitized HTML of its last visible screen
+  // The snapshot is display-only: strip element ids (so the miniature can never
+  // shadow the live view's selectors) and neutralize iframes (a preview must
+  // not reload pages or touch the network).
+  const snapClean = html => String(html || '')
+    .replace(/\sid="[^"]*"/g, '')
+    .replace(/<iframe\b[^>]*>/gi, '<div class="shot-blank">')
+    .replace(/<\/iframe>/gi, '</div>');
+  function snapApp() {
+    if (!_frameApp) return;
+    const v = $('#afView');
+    if (v && v.innerHTML) _shots[_frameApp] = snapClean(v.innerHTML);
+  }
+
+  const _ago = since => {
+    const m = Math.max(0, Math.round((Date.now() - (since || Date.now())) / 60000));
+    return m < 1 ? 'just now' : m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
+  };
+
   function toggleActivity() {
+    if (S.recentsOpen) return closeRecents();
+    openRecents();
+  }
+  function openRecents() {
     const running = Sov.running();
     if (!running.length) return toast('No apps running', '', 'layers');
-    // simple recents: show a control-like sheet listing running apps
-    renderControlRecents(running);
-    $('#control').classList.add('open'); S.controlOpen = true;
-  }
-  function renderControlRecents(running) {
+    snapApp();   // the foreground app poses for its card too
     S.recentsOpen = true;
-    const items = running.map(r => {
+    renderRecents(running);
+    const rc = $('#recents');
+    rc.classList.add('open');
+    requestAnimationFrame(() => rc.classList.add('shown'));
+  }
+  function closeRecents() {
+    S.recentsOpen = false;
+    const rc = $('#recents');
+    rc.classList.remove('shown');
+    setTimeout(() => { if (!S.recentsOpen) { rc.classList.remove('open'); rc.innerHTML = ''; } }, 220);
+  }
+  function renderRecents(running) {
+    const cards = running.map((r, i) => {
       const a = Sov.app(r.appId) || resolveHomeApp(r.appId);   // resolve android:<pkg> too
       if (!a) return '';
       const sens = Sov.activeSensorsFor(a.id);
-      return `<div class="row">
-        <span class="li-badge" style="--tint:${a.color}">${ic(a.glyph,16)}</span>
-        <span class="rtext"><div class="rtitle">${esc(a.name)}</div>
-        <div class="rsub">${sens.length ? sens.map(s=>cap(labelFor(s))).join(' · ') : 'running'}</div></span>
-        <button class="mini-btn danger" data-kill="${a.id}">Close</button></div>`;
+      const shot = _shots[a.id];
+      const dots = sens.map(s => `<span class="rc-dot ${s}" title="${cap(labelFor(s))} in use"></span>`).join('');
+      const meta = sens.length
+        ? sens.map(s => cap(labelFor(s))).join(' · ') + ' in use'
+        : `Open · ${_ago(r.since)}`;
+      return `
+        <article class="rc-card ${a.id === _frameApp && S.appOpen ? 'fg' : ''}" data-open="${a.id}" style="--col:${a.color};--i:${i}">
+          <header class="rc-head">
+            <span class="rc-badge">${ic(a.glyph, 14)}</span>
+            <span class="rc-name">${esc(a.name)}</span>${dots}
+            <button class="rc-x" data-kill="${a.id}" aria-label="Close ${esc(a.name)}">${ic('x', 12)}</button>
+          </header>
+          <div class="rc-shot">
+            ${shot ? `<div class="rc-shot-inner" aria-hidden="true">${shot}</div>`
+                   : `<div class="rc-ghost" aria-hidden="true">${ic(a.glyph, 46)}</div>`}
+            <div class="rc-veil"></div>
+          </div>
+          <footer class="rc-meta ${sens.length ? 'live' : ''}">${esc(meta)}</footer>
+        </article>`;
     }).join('');
-    $('#controlBody').innerHTML = `
-      <div class="section-head"><span class="eyebrow">Running apps</span>
-        <button class="act" data-nav="__control">Quick settings ›</button></div>
-      <div class="card">${items}</div>`;
-    $('#controlBody').querySelectorAll('[data-kill]').forEach(b => b.onclick = () => {
-      if (b.dataset.kill === _frameApp) teardownFrameDom();   // real close → stop camera/audio, drop DOM
-      Sov.closeApp(b.dataset.kill);
+    $('#recents').innerHTML = `
+      <div class="rc-top"><span class="eyebrow">Recents</span><span class="rc-count">${running.length} running</span></div>
+      <div class="rc-rail">${cards}</div>
+      <div class="rc-actions"><button class="rc-clear" data-clearall>${ic('x',13)}<span>Clear all</span></button></div>`;
+
+    $$('#recents .rc-card').forEach(card => card.onclick = e => {
+      if (e.target.closest('[data-kill]')) return;
+      const id = card.dataset.open;
+      closeRecents();
+      const a = Sov.app(id) || resolveHomeApp(id);
+      // The foreground session (its DOM is still live) resumes directly;
+      // anything else goes through the normal launch flow.
+      if (id === _frameApp && a) openAppFrame(a); else launch(id);
+    });
+    $$('#recents [data-kill]').forEach(b => b.onclick = e => {
+      e.stopPropagation();
+      const id = b.dataset.kill;
+      if (id === _frameApp) teardownFrameDom();   // real close → stop camera/audio, drop DOM
+      Sov.closeApp(id); delete _shots[id];
       const rn = Sov.running();
-      if (rn.length) renderControlRecents(rn); else { closeControl(); if (S.view==='home') renderHome(); }
+      if (rn.length) renderRecents(rn); else { closeRecents(); if (S.view === 'home') renderHome(); }
       updateHelm();
     });
-    $('#controlBody').querySelector('[data-nav="__control"]').onclick = () => { S.ctlTab = 'controls'; renderControl(); };
+    const ca = $('#recents [data-clearall]');
+    if (ca) ca.onclick = () => {
+      teardownFrameDom();
+      Sov.running().forEach(r => { Sov.closeApp(r.appId); delete _shots[r.appId]; });
+      closeRecents();
+      if (S.appOpen) closeAppFrame(true);
+      if (S.view === 'home') renderHome();
+      updateHelm();
+      toast('All apps closed', 'ok', 'check');
+    };
+    // land the rail on the foreground card, if there is one
+    const fg = $('#recents .rc-card.fg');
+    if (fg) fg.scrollIntoView({ inline: 'center', block: 'nearest' });
   }
 
   /* ======================================================================
