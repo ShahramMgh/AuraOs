@@ -187,6 +187,16 @@ def main():
         # ---- Media ----
         st, d = j("/api/music", token); check("music endpoint shape", "items" in d)
 
+        # ---- Live services (opt-in egress; these checks trigger NO fetch) ----
+        check("wallpaper/daily is 401 without token", req("GET", "/api/wallpaper/daily")[0] == 401)
+        check("weather is 401 without token", req("GET", "/api/weather?lat=1&lon=1")[0] == 401)
+        st, d = j("/api/weather", token)   # no place given → honest ask, no egress
+        check("weather without a place degrades honestly",
+              st == 200 and d.get("available") is False and "error" in d)
+        st, d = j("/api/geocode?q=", token)   # too short → empty result, no egress
+        check("geocode guards short queries (no egress)",
+              st == 200 and d.get("results") == [])
+
         # ---- Cellular (honest degrade, no modem attached) ----
         st, d = j("/api/phone/status", token)
         check("phone status honest (present:false)", d.get("available") is True and d.get("present") is False)

@@ -672,6 +672,48 @@ const Sov = (() => {
       },
     },
 
+    /* ---- Live services (opt-in) — daily wallpaper + weather ---------------
+       All egress goes through the agent (the one door). The shell calls these
+       only while the user's Personalize toggle is on. SIM: weather/geocode
+       answer with plausible canned data (same shape) so the whole flow is
+       explorable offline; the wallpaper image honestly can't exist without
+       the agent, so it degrades with a plain reason instead of pretending. */
+    async wallpaperDaily() {
+      if (mode === 'live') {
+        const r = await getJSON('/api/wallpaper/daily'); if (r) return r;
+        return { available: false, error: 'The agent did not answer.' };
+      }
+      return { available: false, sim: true,
+               error: 'Live wallpaper needs the device agent — in simulation nothing leaves this page.' };
+    },
+    wallpaperImageUrl(d) {
+      if (mode !== 'live' || !TOKEN) return null;
+      return AGENT + '/api/wallpaper/image?t=' + encodeURIComponent(TOKEN) + (d ? '&d=' + encodeURIComponent(d) : '');
+    },
+    async weather(lat, lon) {
+      if (mode === 'live') {
+        const r = await getJSON(`/api/weather?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}`);
+        if (r) return r;
+        return { available: false, error: 'The agent did not answer.' };
+      }
+      return { available: true, sim: true, source: 'SIM', temp: 18.2, feels: 17.1,
+               humidity: 62, wind: 11, code: 2, isDay: true, label: 'Partly cloudy', hi: 21, lo: 12 };
+    },
+    async geocode(q) {
+      if (mode === 'live') {
+        const r = await getJSON('/api/geocode?q=' + encodeURIComponent(q || ''));
+        if (r) return r;
+        return { available: false, results: [], error: 'The agent did not answer.' };
+      }
+      const name = (q || '').trim();
+      if (name.length < 2) return { available: true, sim: true, results: [] };
+      const cap = name.charAt(0).toUpperCase() + name.slice(1);
+      return { available: true, sim: true, results: [
+        { name: cap, admin: 'Simulated', country: 'SIM', lat: 48.8567, lon: 2.3510 },
+        { name: cap + ' Springs', admin: 'Simulated', country: 'SIM', lat: 52.52, lon: 13.405 },
+      ] };
+    },
+
     /* ---- Notes — a native app backed by real files on the device --------- */
     notes: {
       async list()      { if (mode === 'live') { const r = await getJSON('/api/notes'); if (r) return r; } return SIMNOTES.list(); },

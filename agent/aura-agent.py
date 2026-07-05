@@ -18,6 +18,7 @@
 #   - Binds to 127.0.0.1 only. Never listens on the network.
 # ============================================================================
 import base64, json, os, re, secrets, shlex, shutil, socket, stat, subprocess, sys, glob, time
+import urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
 
@@ -573,6 +574,139 @@ def calendar_op(body):
         json.dump(lst, f, indent=2)
     os.replace(tmp, CALENDAR_FILE)
     return {"ok": True, "events": lst}
+
+
+# ---------------------------------------------------------------------------
+# LIVE SERVICES (opt-in) — daily wallpaper + weather.
+#
+# The only egress in the agent. Both are OFF by default: these functions run
+# solely when the shell calls their endpoints, and the shell calls them solely
+# while the user has the matching Personalize toggle on — the toggle is the
+# plain-language consent. Nothing personal is sent: the wallpaper fetch carries
+# no parameters at all, the weather fetch carries the coordinates of a place
+# the user typed in (never GPS). Failures are values (`available: false` + a
+# plain reason), never exceptions, and never a fake success.
+# ---------------------------------------------------------------------------
+WALLPAPER_IMG = os.path.join(STATE_DIR, "wallpaper-daily.jpg")
+WALLPAPER_META = os.path.join(STATE_DIR, "wallpaper-daily.json")
+
+
+def http_json(url, timeout=8):
+    """GET a JSON document; None on any failure (offline is a value here)."""
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "AuraOS/1.0"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8", "replace"))
+    except Exception:
+        return None
+
+
+def wallpaper_daily():
+    """Bing's image of the day (free, keyless), cached on disk for the day so
+    at most one fetch per day happens no matter how often the shell asks."""
+    today = time.strftime("%Y-%m-%d")
+    try:
+        with open(WALLPAPER_META) as f:
+            meta = json.load(f)
+        if meta.get("date") == today and os.path.isfile(WALLPAPER_IMG):
+            return dict(meta, available=True)
+    except Exception:
+        pass
+    j = http_json("https://www.bing.com/HPImageArchive.aspx?format=js&idx=0&n=1&mkt=en-US")
+    img = (j.get("images") or [{}])[0] if isinstance(j, dict) else {}
+    urlbase = img.get("urlbase")
+    if not urlbase:
+        return {"available": False, "error": "The image service could not be reached."}
+    data = None
+    for size in ("_1080x1920.jpg", "_1920x1080.jpg"):   # portrait first (it's a phone)
+        try:
+            req = urllib.request.Request("https://www.bing.com" + urlbase + size,
+                                         headers={"User-Agent": "AuraOS/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                data = r.read()
+            if data and len(data) > 1024:
+                break
+            data = None
+        except Exception:
+            data = None
+    if not data:
+        return {"available": False, "error": "The image could not be downloaded."}
+    try:
+        tmp = WALLPAPER_IMG + ".tmp"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, WALLPAPER_IMG)
+    except Exception:
+        return {"available": False, "error": "The image could not be saved."}
+    meta = {"date": today, "title": img.get("title") or "",
+            "copyright": img.get("copyright") or "", "source": "Bing Image of the Day"}
+    try:
+        with open(WALLPAPER_META, "w") as f:
+            json.dump(meta, f)
+    except Exception:
+        pass
+    return dict(meta, available=True)
+
+
+# WMO weather interpretation codes → a short human label.
+WMO_LABEL = {
+    0: "Clear sky", 1: "Mostly clear", 2: "Partly cloudy", 3: "Overcast",
+    45: "Fog", 48: "Icy fog",
+    51: "Light drizzle", 53: "Drizzle", 55: "Heavy drizzle",
+    56: "Freezing drizzle", 57: "Freezing drizzle",
+    61: "Light rain", 63: "Rain", 65: "Heavy rain",
+    66: "Freezing rain", 67: "Freezing rain",
+    71: "Light snow", 73: "Snow", 75: "Heavy snow", 77: "Snow grains",
+    80: "Light showers", 81: "Showers", 82: "Heavy showers",
+    85: "Snow showers", 86: "Snow showers",
+    95: "Thunderstorm", 96: "Thunderstorm & hail", 99: "Thunderstorm & hail",
+}
+
+
+def weather_read(lat, lon):
+    """Current conditions from Open-Meteo (free, keyless, no account)."""
+    url = (f"https://api.open-meteo.com/v1/forecast?latitude={lat:.4f}&longitude={lon:.4f}"
+           "&current=temperature_2m,apparent_temperature,relative_humidity_2m,"
+           "weather_code,wind_speed_10m,is_day"
+           "&daily=temperature_2m_max,temperature_2m_min&forecast_days=1&timezone=auto")
+    j = http_json(url)
+    if not isinstance(j, dict) or "current" not in j:
+        return {"available": False, "error": "The weather service could not be reached."}
+    c = j.get("current") or {}
+    d = j.get("daily") or {}
+    code = int(c.get("weather_code") or 0)
+    return {"available": True, "source": "Open-Meteo",
+            "temp": c.get("temperature_2m"), "feels": c.get("apparent_temperature"),
+            "humidity": c.get("relative_humidity_2m"), "wind": c.get("wind_speed_10m"),
+            "code": code, "isDay": bool(c.get("is_day", 1)),
+            "label": WMO_LABEL.get(code, "Unsettled"),
+            "hi": (d.get("temperature_2m_max") or [None])[0],
+            "lo": (d.get("temperature_2m_min") or [None])[0]}
+
+
+def weather_cached(lat, lon):
+    """15-minute cache per place; a failed read is not cached, so recovery from
+    a network blip is immediate rather than a quarter-hour away."""
+    key = "wx:%.2f,%.2f" % (lat, lon)
+    val = cached(key, 900, lambda: weather_read(lat, lon))
+    if not val.get("available"):
+        _CACHE.pop(key, None)
+    return val
+
+
+def geocode(name):
+    """Place-name → candidate coordinates (Open-Meteo geocoding). The user
+    types a city; we never touch GPS for the weather."""
+    j = http_json("https://geocoding-api.open-meteo.com/v1/search?count=5&language=en"
+                  "&format=json&name=" + urllib.parse.quote(name))
+    if not isinstance(j, dict):
+        return {"available": False, "results": [],
+                "error": "The place search could not be reached."}
+    return {"available": True, "results": [
+        {"name": r.get("name") or "", "admin": r.get("admin1") or "",
+         "country": r.get("country") or "",
+         "lat": r.get("latitude"), "lon": r.get("longitude")}
+        for r in (j.get("results") or [])]}
 
 
 def files_search(q, limit=120):
@@ -1325,6 +1459,32 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, {"contacts": contacts_load()})
         if p == "/api/calendar":
             return self._send(200, {"events": calendar_load()})
+        # ---- Live services (opt-in; the shell only calls these while the
+        #      matching Personalize toggle is on — that toggle is the consent) ----
+        if p == "/api/wallpaper/daily":
+            return self._send(200, wallpaper_daily())
+        if p == "/api/wallpaper/image":
+            meta = wallpaper_daily()
+            if not meta.get("available"):
+                return self._send(404, {"error": meta.get("error", "no image")})
+            try:
+                with open(WALLPAPER_IMG, "rb") as f:
+                    return self._send(200, f.read(), "image/jpeg")
+            except Exception:
+                return self._send(404, {"error": "read failed"})
+        if p == "/api/weather":
+            q = parse_qs(urlsplit(self.path).query)
+            try:
+                lat = float(q["lat"][0]); lon = float(q["lon"][0])
+            except Exception:
+                return self._send(200, {"available": False, "error": "Pick a place first."})
+            return self._send(200, weather_cached(lat, lon))
+        if p == "/api/geocode":
+            q = parse_qs(urlsplit(self.path).query)
+            name = (q.get("q", [""])[0] or "").strip()
+            if len(name) < 2:
+                return self._send(200, {"available": True, "results": []})
+            return self._send(200, cached("geo:" + name.lower(), 3600, lambda: geocode(name)))
         return self._serve_static(p)
 
     def _vault_used(self):

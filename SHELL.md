@@ -96,7 +96,7 @@ its footer, so the switcher tells the same honest story as the Aura.
 **Personalize** (Settings › Personalize) makes it yours, per-device and offline:
 a **wallpaper** picker (nine gradient presets, or any photo from `~/Pictures`),
 a **color theme**, **live effects** (aurora / starfield / drift / rainfall /
-fireflies / off, with a motion level), a **home clock widget** (six styles,
+fireflies / match-the-sky / off, with a motion level), a **home clock widget** (six styles,
 two sizes — and free placement: drag the clock itself while editing home, or
 pick left/center/right here), **home widgets** (an **Up next** card showing the
 next real calendar event — hidden when nothing is scheduled, never faked), an
@@ -108,6 +108,23 @@ On the home screen you **swipe between pages** (dots track your position) and
 (smooth FLIP) and it all persists. These are stored as device-local prefs
 (`localStorage`); when the AI Engine proposes a layout in Phase II, the user's
 own choice wins.
+
+**Live services** (Personalize, off by default — the toggle is the plain-language
+consent, and all egress goes through the agent, never straight from the shell):
+**Daily wallpaper** fetches Bing's image of the day (free, keyless) once per
+day — the agent caches it on disk (`/api/wallpaper/daily` meta +
+`/api/wallpaper/image` bytes) and it dresses home *and* the lock screen; the
+request carries no parameters at all, and Personalize shows the image's title
+and attribution. **Live weather** shows current conditions on home and lock
+from **Open-Meteo** (free, keyless, open-source data): you type a **city**
+(`/api/geocode`) and only its coordinates are stored, on-device — **GPS is
+never consulted**; readings (`/api/weather`) are cached 15 minutes agent-side.
+The **"Match the sky"** live effect maps the WMO weather code onto the ambient
+layer — rain and showers rain, snow snows, thunderstorms flash, clear nights
+go starfield — and falls back to a calm aurora when there's no reading (never
+a guess). Turn either toggle off and the shell stops asking; nothing fetches
+in the background. In SIM, weather answers with clearly-simulated canned data
+and the daily wallpaper says plainly that it needs the agent.
 
 ---
 

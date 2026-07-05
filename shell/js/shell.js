@@ -43,15 +43,25 @@
     { id: 'dawn',   name: 'Dawn',   css: 'radial-gradient(120% 85% at 50% -10%, #33202b 0%, #1a1420 48%, #0a0810 100%)' },
     { id: 'abyss',  name: 'Abyss',  css: 'radial-gradient(90% 75% at 70% -5%, #0a1f38 0%, #071426 50%, #030710 100%)' },
   ];
-  function applyWallpaper() {
+  let _wpDaily = null;   // last daily-wallpaper answer (meta or honest failure), for Personalize
+  async function applyWallpaper() {
+    const setWp = v => document.documentElement.style.setProperty('--wallpaper', v);
+    // Live daily wallpaper (opt-in): one Bing image a day, fetched by the agent
+    // only because the user turned it on. On any failure we fall through to the
+    // local choice — a plain reason shows in Personalize, never a blank screen.
+    if (PREF.get('liveWallpaper', false)) {
+      _wpDaily = await Sov.wallpaperDaily();
+      const url = _wpDaily && _wpDaily.available && Sov.wallpaperImageUrl(_wpDaily.date);
+      if (url) return setWp(`center / cover no-repeat url("${url}")`);
+    } else _wpDaily = null;
     const img = PREF.get('wallpaperImg', null);
     const url = img && Sov.photoUrl ? Sov.photoUrl(img) : null;
     if (url) {   // a photo from ~/Pictures wins over the gradient presets
-      document.documentElement.style.setProperty('--wallpaper', `center / cover no-repeat url("${url}")`);
+      setWp(`center / cover no-repeat url("${url}")`);
       return;
     }
     const w = WALLPAPERS.find(x => x.id === PREF.get('wallpaper', 'petrol')) || WALLPAPERS[0];
-    document.documentElement.style.setProperty('--wallpaper', w.css);
+    setWp(w.css);
   }
   // A photo picker (~/Pictures) → set it as the wallpaper.
   async function openPhotoPicker() {
@@ -76,6 +86,46 @@
     });
   }
 
+  // Weather place picker — type a city, pick a match (Open-Meteo geocoding via
+  // the agent). Only the chosen coordinates are stored, on-device; GPS is
+  // never consulted for the weather.
+  function openPlacePicker() {
+    const scrim = $('#promptScrim');
+    const close = () => { scrim.classList.remove('open'); setTimeout(() => { if (!scrim.classList.contains('open')) scrim.innerHTML = ''; }, 200); };
+    scrim.innerHTML = `<div class="prompt-card">
+      <div class="pc-title">Weather place</div>
+      <div class="pc-body">Type a city — only its coordinates are kept, on this device.</div>
+      <input class="pp-input" id="ppQ" type="text" placeholder="e.g. Tehran, Berlin, Osaka" autocomplete="off">
+      <div class="pp-results" id="ppResults"></div>
+      <button class="pbtn deny" data-close style="margin-top:10px">Cancel</button></div>`;
+    scrim.classList.add('open');
+    scrim.querySelector('[data-close]').onclick = close;
+    const q = $('#ppQ'), out = $('#ppResults');
+    let seq = 0;
+    q.oninput = async () => {
+      const my = ++seq, term = q.value.trim();
+      if (term.length < 2) { out.innerHTML = ''; return; }
+      out.innerHTML = `<div class="pp-note">Searching…</div>`;
+      const r = await Sov.geocode(term);
+      if (my !== seq) return;   // a newer keystroke owns the box
+      if (!r || r.available === false) { out.innerHTML = `<div class="pp-note">${esc((r && r.error) || 'Search failed.')}</div>`; return; }
+      if (!r.results.length) { out.innerHTML = `<div class="pp-note">No places found.</div>`; return; }
+      out.innerHTML = r.results.map((p, i) => `
+        <button class="pp-item" data-pp="${i}">${ic('map',14)}
+          <span class="ppi-text"><span class="ppi-name">${esc(p.name)}</span>
+          <span class="ppi-sub">${esc([p.admin, p.country].filter(Boolean).join(' · '))}</span></span></button>`).join('');
+      out.querySelectorAll('[data-pp]').forEach(b => b.onclick = async () => {
+        const p = r.results[+b.dataset.pp];
+        PREF.set('wxPlace', { name: p.name, country: p.country, lat: p.lat, lon: p.lon });
+        close();
+        await refreshWeather(true);
+        if (S.view === 'personalize') renderPersonalize();
+        toast(`Weather set to ${p.name}`, 'ok', 'check');
+      });
+    };
+    setTimeout(() => q.focus(), 50);
+  }
+
   /* Color themes — one accent hue drives the whole appearance: every derived
      token, glow and gradient in auraos.css follows --accent, and the Aura's
      resting light follows it too. Sensor colours stay semantic on any theme. */
@@ -97,19 +147,64 @@
   /* Live effects — an ambient layer behind home + lock, a motion level, and a
      warm Night Light tint. Pure CSS, chosen by the user, stored on-device. */
   const FX = [
-    { id: 'aurora', name: 'Aurora',    sub: 'Breathing pools of light' },
-    { id: 'stars',  name: 'Starfield', sub: 'A quiet night sky' },
-    { id: 'drift',  name: 'Drift',     sub: 'Slow color currents' },
-    { id: 'rain',   name: 'Rainfall',  sub: 'Streaks of falling light' },
-    { id: 'embers', name: 'Fireflies', sub: 'Drifting motes of light' },
-    { id: 'off',    name: 'Minimal',   sub: 'No ambient layer' },
+    { id: 'aurora',  name: 'Aurora',        sub: 'Breathing pools of light' },
+    { id: 'stars',   name: 'Starfield',     sub: 'A quiet night sky' },
+    { id: 'drift',   name: 'Drift',         sub: 'Slow color currents' },
+    { id: 'rain',    name: 'Rainfall',      sub: 'Streaks of falling light' },
+    { id: 'embers',  name: 'Fireflies',     sub: 'Drifting motes of light' },
+    { id: 'weather', name: 'Match the sky', sub: 'Follows live weather' },
+    { id: 'off',     name: 'Minimal',       sub: 'No ambient layer' },
   ];
   const FX_LEVELS = [
     { id: 'still', name: 'Still' }, { id: 'calm', name: 'Calm' }, { id: 'vivid', name: 'Vivid' },
   ];
+
+  /* ---- Live weather (opt-in) ----------------------------------------------
+     Conditions from Open-Meteo, via the agent, for a place the user typed in
+     (never GPS). Off by default; the Personalize toggle is the consent. Feeds
+     a small reading on home + lock, and — if the ambient effect is set to
+     "Match the sky" — drives which ambient layer plays. */
+  let _wx = { at: 0, data: null };
+  const weatherOn = () => PREF.get('weatherOn', false) && !!PREF.get('wxPlace', null);
+  // WMO weather code → the ambient effect that matches the sky.
+  const WX_FX = (code, isDay) =>
+    code >= 95 ? 'storm'
+    : (code >= 71 && code <= 77) || code === 85 || code === 86 ? 'snow'
+    : (code >= 51 && code <= 67) || (code >= 80 && code <= 82) ? 'rain'
+    : code >= 1 ? 'drift'
+    : isDay ? 'aurora' : 'stars';
+  const wxIcon = w =>
+    w.code >= 95 ? 'bolt'
+    : (w.code >= 71 && w.code <= 77) || w.code === 85 || w.code === 86 ? 'snowy'
+    : (w.code >= 51 && w.code <= 67) || (w.code >= 80 && w.code <= 82) ? 'rainy'
+    : w.code >= 2 ? 'cloud'
+    : w.isDay ? 'sun' : 'moon';
+  async function refreshWeather(force) {
+    if (!weatherOn()) { _wx = { at: 0, data: null }; applyEffects(); paintWeather(); return null; }
+    if (!force && _wx.data && Date.now() - _wx.at < 15 * 60000) return _wx.data;
+    const p = PREF.get('wxPlace', null);
+    _wx = { at: Date.now(), data: await Sov.weather(p.lat, p.lon) };
+    applyEffects();     // "Match the sky" may need a different layer now
+    paintWeather();
+    return _wx.data;
+  }
+  const wxReading = w => `${Math.round(w.temp)}° · ${w.label}`;
+  function paintWeather() {
+    const el = $('#homeWx'); if (!el) return;
+    const w = weatherOn() && _wx.data && _wx.data.available ? _wx.data : null;
+    el.innerHTML = w ? `${ic(wxIcon(w), 14)}<span>${esc(wxReading(w))}</span>` : '';
+    el.classList.toggle('on', !!w);
+  }
+
   function applyEffects() {
     const root = document.documentElement;
-    root.dataset.fx = PREF.get('fx', 'aurora');
+    let fx = PREF.get('fx', 'aurora');
+    if (fx === 'weather') {
+      const w = _wx.data && _wx.data.available ? _wx.data : null;
+      // no reading (yet, or weather off) → a calm default, not a guess
+      fx = w ? WX_FX(w.code, w.isDay) : 'aurora';
+    }
+    root.dataset.fx = fx;
     root.dataset.fxLevel = PREF.get('fxLevel', 'calm');
     $('#device').classList.toggle('nightlight', PREF.get('nightlight', false));
   }
@@ -426,6 +521,7 @@
         <section class="aura-hero align-${clockAlign()} size-${clockSize()}" style="--clock-dy:${clockY()}px">
           ${clockWidgetHTML(st)}
           <div class="aura-date">${esc(st.date)} · ${esc(cfg.greeting || greetShort(st.time))}</div>
+          <div class="aura-wx" id="homeWx"></div>
           <button class="aura-status" id="auraStatus" data-nav="permissions">${auraStatusHTML()}</button>
         </section>
         <div id="suggestSlot"></div>
@@ -454,6 +550,7 @@
     const hs = $('#homeSearch'); if (hs) hs.onclick = () => openSearch();
     maybeSuggest();   // the resident may gently offer a learned routine (async)
     paintUpNext();    // the next real calendar event, if any (async)
+    paintWeather();   // the live reading, if the user turned weather on
   }
 
   const activeSensorKinds = () => Object.keys(Sov.get().sensors);   // 'mic'|'cam'|'loc'
@@ -3131,6 +3228,8 @@
     const apps = Sov.apps();
     const cfg = HOME_CFG || Sov._homeCfgSync();
     const wp = PREF.get('wallpaper', 'petrol');
+    const liveWp = PREF.get('liveWallpaper', false);
+    const wxPlace = PREF.get('wxPlace', null);
     const focus = PREF.get('focus', null) || cfg.focus || 'assistant';
     const hPages = homePagesIds();
     const pageOf = id => { for (let i = 0; i < hPages.length; i++) if ((hPages[i] || []).includes(id)) return i; return -1; };
@@ -3181,6 +3280,35 @@
       <div class="section-head"><span class="eyebrow">Wallpaper</span></div>
       <div class="wp-grid">${swatches}</div>
       <button class="mini-btn" id="wpFromPhotos" style="margin-top:10px">${ic('photo',14)} Choose from Photos</button>
+      <div class="card" style="margin-top:10px">
+        <button class="row tappable" data-livewp style="width:100%;text-align:left"><span class="glyph">${ic('globe',18)}</span>
+          <span class="rtext"><div class="rtitle">Daily wallpaper</div>
+            <div class="rsub">${liveWp
+              ? (_wpDaily ? (_wpDaily.available
+                  ? esc(`Today: ${_wpDaily.copyright || _wpDaily.title || 'Bing Image of the Day'}`)
+                  : esc(_wpDaily.error || 'Not available right now.')) : 'Fetching today’s image…')
+              : 'One Bing photo a day, on home &amp; lock · uses the network, only while on'}</div></span>
+          <span class="switch ${liveWp ? 'on' : ''}"></span></button>
+      </div>
+      <div class="section-head"><span class="eyebrow">Weather</span>
+        <span class="muted" style="font-size:11px">Open-Meteo · asks only while on</span></div>
+      <div class="card">
+        <button class="row tappable" data-wxtgl style="width:100%;text-align:left"><span class="glyph">${ic('sun',18)}</span>
+          <span class="rtext"><div class="rtitle">Live weather</div>
+            <div class="rsub">Conditions for your chosen place, on home &amp; lock — never your GPS</div></span>
+          <span class="switch ${PREF.get('weatherOn', false) ? 'on' : ''}"></span></button>
+        <button class="row tappable" data-wxplace style="width:100%;text-align:left"><span class="glyph">${ic('map',18)}</span>
+          <span class="rtext"><div class="rtitle">Place</div>
+            <div class="rsub">${wxPlace ? esc(wxPlace.name + (wxPlace.country ? ' · ' + wxPlace.country : '')) : 'Not set — pick a city'}</div></span>
+          <span class="chev">${ic('chev',16)}</span></button>
+        ${weatherOn() && _wx.data
+          ? `<div class="row"><span class="glyph">${ic(_wx.data.available ? wxIcon(_wx.data) : 'info',18)}</span>
+              <span class="rtext"><div class="rtitle">${_wx.data.available ? esc(wxReading(_wx.data)) : 'No reading'}</div>
+              <div class="rsub">${_wx.data.available
+                ? esc(`H ${Math.round(_wx.data.hi)}° · L ${Math.round(_wx.data.lo)}° · wind ${Math.round(_wx.data.wind)} km/h${_wx.data.sim ? ' · simulated' : ''}`)
+                : esc(_wx.data.error || 'The weather service could not be reached.')}</div></span></div>`
+          : ''}
+      </div>
       <div class="section-head"><span class="eyebrow">Live effects</span>
         <span class="muted" style="font-size:11px">ambient · rendered on-device</span></div>
       <div class="fx-grid">${fxChips}</div>
@@ -3252,11 +3380,31 @@
       PREF.set('wallpaperImg', null); PREF.set('wallpaper', b.dataset.wp); applyWallpaper(); renderPersonalize();
     });
     const wfp = $('#wpFromPhotos'); if (wfp) wfp.onclick = () => openPhotoPicker();
+    const lwp = $('#screenScroll').querySelector('[data-livewp]');
+    if (lwp) lwp.onclick = async () => {
+      PREF.set('liveWallpaper', !PREF.get('liveWallpaper', false));
+      renderPersonalize();                    // switch flips immediately…
+      await applyWallpaper();                 // …then the fetch reports honestly
+      renderPersonalize();
+    };
+    const wxt = $('#screenScroll').querySelector('[data-wxtgl]');
+    if (wxt) wxt.onclick = async () => {
+      const on = !PREF.get('weatherOn', false);
+      PREF.set('weatherOn', on);
+      renderPersonalize();
+      if (on && !PREF.get('wxPlace', null)) return openPlacePicker();
+      await refreshWeather(true);
+      renderPersonalize();
+    };
+    const wxp = $('#screenScroll').querySelector('[data-wxplace]');
+    if (wxp) wxp.onclick = () => openPlacePicker();
     $('#screenScroll').querySelectorAll('[data-th]').forEach(b => b.onclick = () => {
       PREF.set('theme', b.dataset.th); applyTheme(); renderPersonalize();
     });
     $('#screenScroll').querySelectorAll('[data-fx]').forEach(b => b.onclick = () => {
       PREF.set('fx', b.dataset.fx); applyEffects(); renderPersonalize();
+      if (b.dataset.fx === 'weather' && !weatherOn())
+        toast('Turn on Live weather below to let the sky drive this', '', 'sun');
     });
     $('#screenScroll').querySelectorAll('[data-fxlvl]').forEach(b => b.onclick = () => {
       PREF.set('fxLevel', b.dataset.fxlvl); applyEffects(); renderPersonalize();
@@ -4201,6 +4349,8 @@
       <div class="lock-top">
         <div class="lock-clock">${st.time}</div>
         <div class="lock-date">${esc(st.date)}</div>
+        ${weatherOn() && _wx.data && _wx.data.available
+          ? `<div class="lock-wx">${ic(wxIcon(_wx.data), 13)}<span>${esc(wxReading(_wx.data))}</span></div>` : ''}
         <div class="lock-status">${ic('shieldChk',13)}<span>Encrypted &amp; sealed</span></div>
       </div>
       <div class="lock-mid">${lockNotifs}</div>
@@ -4587,6 +4737,10 @@
     applyTheme();
     applyEffects();
     applyIconStyle();
+    refreshWeather();   // no-op unless the user enabled Live weather
+    // keep the reading current while enabled (refreshWeather itself is
+    // 15-min-cached, so this costs nothing extra between refreshes)
+    setInterval(() => { if (weatherOn()) refreshWeather(); }, 5 * 60000);
     seedNotifications();
     Sov.notify.subscribe(onNotify);
     Sov.onUpdate(onUpdate);
