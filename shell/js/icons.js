@@ -17,6 +17,8 @@ const ICON = (() => {
     key:        `<circle cx="8" cy="14" r="4"/><path d="M11 11l8-8M17 5l2 2M14 8l2 2"/>`,
     mic:        `<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4"/>`,
     micOff:     `<path d="M9 5a3 3 0 0 1 6 0v4M15 12.5a3 3 0 0 1-4.5 1.9M6 11a6 6 0 0 0 8.5 5.4M12 17v4"/><path d="M4 4l16 16"/>`,
+    camOff:     `<path d="M8 7h6a2 2 0 0 1 2 2v6M16 11l5-3v9l-2-1.2M3.8 7.8A2 2 0 0 0 3 9.4V16a2 2 0 0 0 2 2h8"/><path d="M4 4l16 16"/>`,
+    locOff:     `<path d="M8.6 4.9A6 6 0 0 1 18 10c0 1.9-.9 4-2.6 6.6M7.1 7.2A6 6 0 0 0 6 10c0 2.8 2 6 6 11 1-1.2 1.8-2.3 2.6-3.4"/><path d="M4 4l16 16"/>`,
     cam:        `<rect x="3" y="7" width="13" height="11" rx="2"/><path d="M16 11l5-3v9l-5-3z"/>`,
     loc:        `<path d="M12 21c4-5 6-8.2 6-11a6 6 0 1 0-12 0c0 2.8 2 6 6 11z"/><circle cx="12" cy="10" r="2.2"/>`,
     wifi:       `<path d="M2 8.5a15 15 0 0 1 20 0M5 12a10 10 0 0 1 14 0M8 15.5a5 5 0 0 1 8 0"/><circle cx="12" cy="19" r="1"/>`,

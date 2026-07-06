@@ -254,6 +254,32 @@
     root.dataset.tileLabels = PREF.get('tileLabels', true) ? 'on' : 'off';
   }
 
+  /* Typeface + text size (Personalize › Appearance). Device-local, applied by
+     overriding the --font root variable and a --ui-scale zoom that reflows the
+     menu/app/lock text. Every stack ends in system fonts, so a choice degrades
+     gracefully to whatever the image actually ships — no web fonts, no egress. */
+  const FONTS = [
+    { id: 'system',  name: 'Aura',    sub: 'Ubuntu — the default', stack: "'Ubuntu','Inter',-apple-system,'Segoe UI',system-ui,sans-serif" },
+    { id: 'inter',   name: 'Inter',   sub: 'Clean & neutral',      stack: "'Inter','Noto Sans','Ubuntu',system-ui,sans-serif" },
+    { id: 'rounded', name: 'Rounded', sub: 'Soft & friendly',      stack: "'Nunito','Quicksand','Comfortaa','Ubuntu',system-ui,sans-serif" },
+    { id: 'serif',   name: 'Serif',   sub: 'Editorial',            stack: "'Noto Serif','DejaVu Serif',Georgia,'Times New Roman',serif" },
+    { id: 'mono',    name: 'Mono',    sub: 'Technical',            stack: "'Ubuntu Mono','DejaVu Sans Mono',ui-monospace,monospace" },
+  ];
+  const FONT_SIZES = [
+    { id: 's',  name: 'Small',   scale: 0.92 },
+    { id: 'm',  name: 'Default', scale: 1 },
+    { id: 'l',  name: 'Large',   scale: 1.1 },
+    { id: 'xl', name: 'Larger',  scale: 1.22 },
+  ];
+  const fontFace = () => { const f = PREF.get('fontFace', 'system'); return FONTS.some(x => x.id === f) ? f : 'system'; };
+  const fontSizeId = () => { const s = PREF.get('fontSize', 'm'); return FONT_SIZES.some(x => x.id === s) ? s : 'm'; };
+  const fontScale = () => (FONT_SIZES.find(x => x.id === fontSizeId()) || FONT_SIZES[1]).scale;
+  function applyFont() {
+    const root = document.documentElement;
+    root.style.setProperty('--font', (FONTS.find(f => f.id === fontFace()) || FONTS[0]).stack);
+    root.style.setProperty('--ui-scale', String(fontScale()));
+  }
+
   /* ---- top-level layout --------------------------------------------------- */
   const device = $('#device');
   device.innerHTML = `
@@ -379,9 +405,84 @@
     if (v != null) return Math.max(.7, Math.min(1.8, +v || 1));
     return PREF.get('clockSize', 'regular') === 'large' ? 1.3 : 1;
   };
-  // Free placement: the clock may also sit lower on the page — a vertical
-  // offset in px, set by dragging the clock itself in home edit mode.
-  const clockY = () => Math.max(0, Math.min(200, Math.round(+PREF.get('clockY', 0) || 0)));
+  /* ---- home WIDGETS live in the page grid ---------------------------------
+     One positioning system for everything on home: a page is a fixed-slot grid
+     (3 columns × N rows spanning the full page height), icons occupy one cell,
+     and widgets (clock hero · focus card · Up next) occupy full-width row
+     spans at an explicit row. Because widgets and icons share the same grid,
+     nothing can ever overlap: widget-covered cells are BLOCKED for tiles, a
+     repair pass relocates any tile that would collide (see homeLayout), and
+     widgets that would overlap each other are pushed apart, the most recently
+     moved one winning a contested row. In edit mode a widget drags vertically
+     and snaps to a row, exactly like icons snap to cells.
+     Stored as PREF 'homeWidgets': { clock: {page,row,seq}, focus: …, upnext: … }
+     — row null means "auto: stack after the previous widget". */
+  const W_ORDER = ['clock', 'focus', 'upnext'];
+  // The clock hero's row span follows its size, so growing the clock can never
+  // spill onto the rows below it — the grid reserves more rows instead.
+  const HERO_BASE_H = 170;                       // clock+date+weather+status, scale 1
+  const ROW_H = () => 84 + 14;                   // grid-auto-rows + row-gap (see CSS)
+  function widgetSpan(id) {
+    if (id === 'clock') return Math.max(2, Math.ceil((HERO_BASE_H * clockScale()) / ROW_H()));
+    return 1;                                    // focus card · Up next: one row each
+  }
+  function widgetPos() {
+    let w = PREF.get('homeWidgets', null);
+    if (!w || typeof w !== 'object') {
+      // one-time migration from the old free-floating clock (percent anchor):
+      // its vertical percent maps to the nearest row; the overlay days are over.
+      const legacyRow = PREF.get('clockFree', false)
+        ? Math.max(0, Math.min(6, Math.round(((+PREF.get('clockPY', 15) || 15) / 100) * 6))) : 0;
+      w = { clock: { page: 0, row: legacyRow || null, seq: 0 } };
+    }
+    return w;
+  }
+  // Which widgets exist right now, with their rows resolved per page: fixed
+  // rows first (recently-moved wins a tie), then autos stacked underneath —
+  // and any widget overlap resolved by pushing the later one down.
+  function resolveWidgets(showFocus, pageCount) {
+    const pos = widgetPos();
+    const act = [];
+    const add = (id, on) => {
+      if (!on) return;
+      const p = pos[id] || {};
+      act.push({ id, span: widgetSpan(id),
+        page: Math.max(0, Math.min((pageCount || 1) - 1, p.page || 0)),
+        row: (p.row == null ? null : Math.max(0, p.row | 0)), seq: p.seq || 0 });
+    };
+    add('clock', true);
+    add('focus', showFocus);
+    add('upnext', PREF.get('upnext', true));
+    const byPage = {};
+    act.forEach(w => (byPage[w.page] = byPage[w.page] || []).push(w));
+    Object.values(byPage).forEach(list => {
+      list.sort((a, b) => (a.row == null) - (b.row == null)
+        || (a.row || 0) - (b.row || 0) || b.seq - a.seq);
+      let next = 0;
+      list.forEach(w => { w.row = w.row == null ? next : Math.max(w.row, next); next = w.row + w.span; });
+    });
+    return act;
+  }
+  // Every grid cell a page's widgets cover — blocked for icons.
+  function blockedSlotSet(widgets, pi) {
+    const s = new Set();
+    widgets.forEach(w => {
+      if (w.page !== pi) return;
+      for (let r = w.row; r < w.row + w.span; r++)
+        for (let c = 0; c < 3; c++) s.add(r * 3 + c);
+    });
+    return s;
+  }
+  // Nearest non-blocked slot to `slot` (occupied is fine — tile-tile drops
+  // swap). Guarantees a tile can never be dropped under a widget.
+  function freeSlotNear(slot, blocked) {
+    if (!blocked.has(slot)) return slot;
+    for (let d = 1; d < 60; d++) {
+      if (!blocked.has(slot + d)) return slot + d;
+      if (slot - d >= 0 && !blocked.has(slot - d)) return slot - d;
+    }
+    return slot;
+  }
 
   // The time, spelled out (nearest five), for the "Words" style — calm and human.
   const _NUM = ['twelve', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven'];
@@ -524,14 +625,23 @@
     const names = PREF.get('androidApps', {}); names[pkg] = name || pkg; PREF.set('androidApps', names);
     const pgs = homePagesIds().map(p => (p || []).slice());
     if (!pgs.length) pgs.push([]);
-    if (!pgs.some(p => p.includes(id))) { pgs[pgs.length - 1].push(id); PREF.set('homePages', pgs); }
+    if (!pgs.some(p => p.includes(id))) {
+      // Fill the first empty slot (a gap) if there is one, else take a new slot
+      // at the end — a new app shouldn't punch a hole that a gap could absorb.
+      let placed = false;
+      for (const p of pgs) { const e = p.indexOf(null); if (e !== -1) { p[e] = id; placed = true; break; } }
+      if (!placed) pgs[pgs.length - 1].push(id);
+      PREF.set('homePages', pgs);
+    }
     _androidApps = null;   // drawer refetches
   }
   // Uninstalling an Android app removes it from home + name map everywhere.
   function removeAndroidFromHome(pkg) {
     const id = 'android:' + pkg;
     const names = PREF.get('androidApps', {}); delete names[pkg]; PREF.set('androidApps', names);
-    PREF.set('homePages', homePagesIds().map(p => (p || []).filter(x => x !== id)));
+    // null the slot (keep positions) rather than filter, which would shift every
+    // later icon up a cell; trailing nulls are trimmed on the next drag persist.
+    PREF.set('homePages', homePagesIds().map(p => (p || []).map(x => x === id ? null : x)));
     _androidApps = null;
   }
   function homeLayout() {
@@ -539,53 +649,111 @@
     const apps = Sov.apps();
     const byId = id => apps.find(a => a.id === id);
     const focus = byId(PREF.get('focus', null) || cfg.focus) || byId('assistant') || apps[0];
+    const showFocus = focus.id !== 'assistant';   // the Aura orb IS the assistant
+
+    let raw = homePagesIds().map(p => (p || []).slice());
+    if (!raw.length) raw = [[]];
+    const widgets = resolveWidgets(showFocus, raw.length);
+
+    // REPAIR PASS — the no-overlap guarantee. Widgets and icons share one slot
+    // grid; any icon sitting in a cell a widget now covers (the clock grew, a
+    // widget was dragged here, a proposal packed slots 0..n) is relocated to
+    // the first free, unblocked cell. Deterministic, and persisted so the
+    // layout is stable on the next render.
+    let changed = false;
+    raw.forEach((p, pi) => {
+      const blocked = blockedSlotSet(widgets, pi);
+      for (let s = 0; s < p.length; s++) {
+        if (p[s] == null || !blocked.has(s)) continue;
+        let t = 0;
+        while (blocked.has(t) || p[t] != null) t++;
+        p[t] = p[s]; p[s] = null; changed = true;
+      }
+    });
+    // Persist the repair only when the user already owns a layout — a repair
+    // of the config-driven default stays derived (recomputed each render, same
+    // result), so the default keeps following home.config.json until the user
+    // actually customizes home.
+    if (changed && PREF.get('homePages', null)) PREF.set('homePages', raw.map(p => {
+      const q = p.slice();
+      while (q.length && q[q.length - 1] == null) q.pop();
+      return q;
+    }));
+
+    // Positions are meaningful: a page is a slot array where index == grid
+    // slot and a null is a deliberately-empty slot (a gap). So we map slot by
+    // slot instead of filtering — a removed/duplicate/unknown app collapses to
+    // null (an empty cell) rather than shifting every later icon up a slot.
     const seen = new Set([focus.id]);
-    let pages = homePagesIds().map(ids =>
-      (ids || []).map(resolveHomeApp).filter(a => a && !seen.has(a.id) && (seen.add(a.id), true)));
-    if (!pages.length) pages = [[]];
-    if (pages.every(p => !p.length)) pages[0] = apps.filter(a => a.id !== focus.id);
-    return { cfg, focus, pages };
+    const pages = raw.map(ids => ids.map(id => {
+      if (id == null) return null;
+      const a = resolveHomeApp(id);
+      if (!a || seen.has(a.id)) return null;
+      seen.add(a.id); return a;
+    }));
+    if (pages.every(p => !p.some(Boolean))) {
+      // first run: lay the catalog into page 0, skipping widget-covered cells
+      const blocked = blockedSlotSet(widgets, 0);
+      const laid = []; let s = 0;
+      apps.filter(a => a.id !== focus.id).forEach(a => {
+        while (blocked.has(s)) laid[s++] = null;
+        laid[s++] = a;
+      });
+      pages[0] = laid;
+    }
+    return { cfg, focus, pages, widgets, showFocus };
   }
 
   function renderHome() {
     const st = Sov.get();
     HOME_CFG = HOME_CFG || Sov._homeCfgSync();
     const animate = _animateHome; _animateHome = false;   // entrance plays once per arrival
-    const { cfg, focus, pages } = homeLayout();
-    // The Aura *is* the assistant's presence, so a separate "assistant" focus
-    // card would be redundant — show a focus card only for another suggested app.
-    const showFocus = focus.id !== 'assistant';
+    const { cfg, focus, pages, widgets } = homeLayout();
+
+    // The hero (clock + date + weather + privacy status) is the clock
+    // widget's CONTENT — the widget itself is a full-width grid resident,
+    // positioned by row exactly like every other widget and icon.
+    const heroInner = `
+      ${clockWidgetHTML(st)}
+      <div class="aura-date">${esc(st.date)} · ${esc(cfg.greeting || greetShort(st.time))}</div>
+      <div class="aura-wx" id="homeWx"></div>
+      <button class="aura-status" id="auraStatus" data-nav="permissions">${auraStatusHTML()}</button>`;
+    const widgetHTML = w => {
+      const body = w.id === 'clock'
+        ? `<section class="aura-hero align-${clockAlign()}" style="--clock-scale:${clockScale()}">${heroInner}</section>`
+        : w.id === 'focus' ? focusCardHTML(focus, cfg)
+        : `<div class="upnext-slot" id="upnextSlot"></div>`;
+      return `<div class="home-widget hw-${w.id}" data-widget="${w.id}"
+        style="grid-column:1 / -1;grid-row:${w.row + 1} / span ${w.span}">${body}</div>`;
+    };
 
     $('#v-home').innerHTML = `
       <div class="home2-aura" aria-hidden="true"></div>
       <div class="home2-body ${S.homeEdit ? 'editing' : ''} ${animate ? 'anim' : ''}">
-        <section class="aura-hero align-${clockAlign()}" style="--clock-dy:${clockY()}px;--clock-scale:${clockScale()}">
-          ${clockWidgetHTML(st)}
-          <div class="aura-date">${esc(st.date)} · ${esc(cfg.greeting || greetShort(st.time))}</div>
-          <div class="aura-wx" id="homeWx"></div>
-          <button class="aura-status" id="auraStatus" data-nav="permissions">${auraStatusHTML()}</button>
-        </section>
         <div id="suggestSlot"></div>
-        <div id="upnextSlot"></div>
-        <button class="home-search" id="homeSearch">${ic('search',16)}<span>Search apps, files, everything</span></button>
-        ${showFocus ? focusCardHTML(focus, cfg) : ''}
         <div class="home-pager" id="homePager">${pages.map((ps, pi) =>
-          `<section class="home-page"><div class="tile-grid" data-page="${pi}">${ps.map(homeTile).join('')}</div></section>`).join('')}</div>
+          `<section class="home-page"><div class="tile-grid" data-page="${pi}">${
+            widgets.filter(w => w.page === pi).map(widgetHTML).join('')}${
+            ps.map((app, i) => app ? homeTile(app, i) : '').join('')}</div></section>`).join('')}</div>
         ${pages.length > 1 ? `<div class="page-dots" id="pageDots">${pages.map((_, pi) =>
           `<button class="pdot ${pi === 0 ? 'on' : ''}" data-pdot="${pi}" aria-label="Page ${pi + 1}"></button>`).join('')}</div>` : ''}
+        <button class="home-search" id="homeSearch">${ic('search',16)}<span>Search apps, files, everything</span></button>
         <div class="home-edit-bar">
           <button class="heb-btn" data-hedit="wallpaper">${ic('sun',15)}<span>Wallpaper</span></button>
           <button class="heb-btn" data-hedit="addpage">${ic('grid',15)}<span>Add page</span></button>
           <button class="heb-btn done" data-hedit="done">Done</button>
         </div>
-        <div style="height:8px"></div>
       </div>`;
+
+    // Each grid remembers which of its cells its widgets cover; the tile drag
+    // consults this so a drop can never land under a widget (see enableTileSort).
+    $$('#homePager .tile-grid').forEach(g => { g._blocked = blockedSlotSet(widgets, +g.dataset.page || 0); });
 
     bindHome();
     $$('#homePager .tile-grid').forEach(g => enableTileSort(g));
     wireHomePager();
     wireHomeEdit();
-    wireClockDrag();
+    wireWidgetDrag();
     wireClockResize();
     const hs = $('#homeSearch'); if (hs) hs.onclick = () => openSearch();
     maybeSuggest();   // the resident may gently offer a learned routine (async)
@@ -632,8 +800,13 @@
     const iconUrl = app.android && Sov.appIconUrl ? Sov.appIconUrl('waydroid.' + app.pkg) : null;
     const img = iconUrl ? `<img class="tile-img" src="${iconUrl}" onerror="this.remove()" alt="">` : '';
     // --i drives the staggered entrance; --col tints the icon its own colour.
+    // Each tile owns an explicit grid cell (data-slot -> grid-column/row) so
+    // tiles never auto-flow/repack: an empty slot stays empty, and a dropped
+    // tile keeps exactly the cell you leave it in. See placeTile()/slotFromPoint().
+    const slot = i || 0, col = (slot % 3) + 1, row = ((slot / 3) | 0) + 1;
     return `
-      <button class="tile ${using}" data-launch="${app.id}" style="--col:${app.color};--i:${i || 0}">
+      <button class="tile ${using}" data-launch="${app.id}" data-slot="${slot}"
+              style="--col:${app.color};--i:${slot};grid-column:${col};grid-row:${row}">
         ${del}<span class="tile-ic"><span class="tile-glow"></span><span class="tile-dot"></span>${ic(app.glyph, 24)}${img}</span>
         <span class="tile-lbl">${esc(app.name)}</span>
       </button>`;
@@ -663,10 +836,14 @@
     if (body) body.classList.add('editing');
     // These gate on S.homeEdit at call time and were wired once already
     // (false) at the initial render — re-arm them now it's actually true.
-    // Missing this was the regression: the clock stopped dragging/resizing
-    // entirely once entering edit mode no longer did a full re-render.
-    wireClockDrag();
+    wireWidgetDrag();
     wireClockResize();
+    // In edit mode a widget is a draggable resident, not a settings shortcut —
+    // drop the tap-to-open handlers bindHome() wired outside edit mode. (The
+    // editing CSS also disables pointer events inside widgets, belt & braces.)
+    const ck = $('#homeClock'); if (ck) ck.onclick = null;
+    const wx = $('#homeWx');    if (wx) wx.onclick = null;
+    const dt = $('#v-home .aura-date'); if (dt) dt.onclick = null;
   }
 
   // The edit-mode chrome (delete ×, edit bar) is always in the DOM and always
@@ -690,7 +867,9 @@
     $$('#v-home [data-hdel]').forEach(x => x.onclick = e => {
       e.stopPropagation(); e.preventDefault();
       const id = x.dataset.hdel;
-      PREF.set('homePages', homePagesIds().map(p => (p || []).filter(a => a !== id)));
+      // Empty the slot in place (null), don't filter — otherwise every icon
+      // after it slides up a cell instead of the removed one leaving a gap.
+      PREF.set('homePages', homePagesIds().map(p => (p || []).map(a => a === id ? null : a)));
       renderHome();
     });
     $$('#v-home [data-hedit]').forEach(b => b.onclick = () => {
@@ -705,28 +884,47 @@
     });
   }
 
-  // In edit mode the clock itself is a draggable widget: a vertical drag moves
-  // it down the page (stored as clockY), and where you let go horizontally
-  // snaps it to left / center / right. All device-local, like the tile layout.
-  function wireClockDrag() {
-    const el = $('#homeClock'); if (!el || !S.homeEdit) return;
-    el.onpointerdown = e => {
-      e.preventDefault(); e.stopPropagation();
-      try { el.setPointerCapture(e.pointerId); } catch (err) {}
-      const body = $('#v-home .home2-body'); if (!body) return;
-      const sx = e.clientX, sy = e.clientY, y0 = clockY();
-      const clampDy = dy => Math.max(-y0, Math.min(200 - y0, dy));
-      el.onpointermove = ev => { el.style.transform = `translate(${ev.clientX - sx}px, ${clampDy(ev.clientY - sy)}px)`; };
-      const up = ev => {
-        el.onpointermove = el.onpointerup = el.onpointercancel = null;
-        el.style.transform = '';
-        PREF.set('clockY', y0 + clampDy(ev.clientY - sy));
-        const br = body.getBoundingClientRect(), cx = ev.clientX - br.left;
-        PREF.set('clockAlign', cx < br.width / 3 ? 'left' : cx > (2 * br.width) / 3 ? 'right' : 'center');
-        renderHome();
+  // In edit mode a widget (clock hero · focus card · Up next) drags vertically
+  // and snaps to a grid ROW — the same slot system the icons use, so a widget
+  // can sit anywhere from the top of the page to the bottom and can never
+  // land on top of anything: resolveWidgets pushes contested widgets apart
+  // (the one you just moved wins the row) and homeLayout's repair pass
+  // relocates any icon out of the landing rows.
+  function wireWidgetDrag() {
+    if (!S.homeEdit) return;
+    $$('#v-home .home-widget').forEach(el => {
+      el.onpointerdown = e => {
+        if (e.target.closest('.clk-resize')) return;   // the size handle wins
+        e.preventDefault();
+        try { el.setPointerCapture(e.pointerId); } catch (_) {}
+        const grid = el.closest('.tile-grid'); if (!grid) return;
+        const cs = getComputedStyle(grid);
+        const rowH = (parseFloat(cs.gridAutoRows) || 84) + (parseFloat(cs.rowGap) || 14);
+        const id = el.dataset.widget, span = widgetSpan(id);
+        const gr = grid.getBoundingClientRect();
+        const startRow = Math.max(0, Math.round((el.getBoundingClientRect().top - gr.top) / rowH));
+        const rowCap = Math.max(0, Math.round(gr.height / rowH) - span);
+        const sy = e.clientY;
+        let moved = false, target = startRow;
+        const move = ev => {
+          if (!moved && Math.abs(ev.clientY - sy) > 6) { moved = true; el.classList.add('dragging'); }
+          if (!moved) return;
+          el.style.transform = `translateY(${ev.clientY - sy}px)`;
+          target = Math.max(0, Math.min(rowCap, Math.round(startRow + (ev.clientY - sy) / rowH)));
+        };
+        const up = () => {
+          el.onpointermove = el.onpointerup = el.onpointercancel = null;
+          el.style.transform = ''; el.classList.remove('dragging');
+          if (moved) {
+            const pos = widgetPos();
+            pos[id] = { page: +grid.dataset.page || 0, row: target, seq: Date.now() };
+            PREF.set('homeWidgets', pos);
+          }
+          renderHome();   // re-resolve rows, repair icons, repaint
+        };
+        el.onpointermove = move; el.onpointerup = up; el.onpointercancel = up;
       };
-      el.onpointerup = up; el.onpointercancel = up;
-    };
+    });
   }
 
   // The clock's size handle (bottom-right, edit mode only) — continuous
@@ -785,28 +983,40 @@
   // Drag-to-rearrange the home tiles. A tap still launches (movement threshold
   // distinguishes tap from drag); a drag reorders with a smooth FLIP animation
   // and persists the new order. This is the "app placement moves on home" bit.
-  function flipReorder(grid, mutate) {
-    const kids = [...grid.children];
-    const before = new Map(kids.map(el => [el, el.getBoundingClientRect()]));
-    mutate();
-    for (const el of grid.children) {
-      if (el.classList.contains('dragging')) continue;
-      const b = before.get(el); if (!b) continue;
-      const a = el.getBoundingClientRect();
-      const dx = b.left - a.left, dy = b.top - a.top;
-      if (dx || dy) {
-        el.style.transition = 'none';
-        el.style.transform = `translate(${dx}px,${dy}px)`;
-        requestAnimationFrame(() => {
-          el.style.transition = 'transform .18s var(--ease)';
-          el.style.transform = '';
-        });
-      }
-    }
+  // ---- fixed-slot home grid helpers ----------------------------------------
+  // A home page is a 3-column grid of fixed slots; a tile lives at an explicit
+  // slot (data-slot) placed via grid-column/grid-row. Empty slots stay empty —
+  // dropping a tile never reflows its neighbours, and gaps are allowed.
+  const HOME_COLS = 3;
+  const tileSlot = t => +(t.dataset.slot || 0);
+  // every real tile on a grid, minus one being dragged (it's out of flow)
+  const gridTiles = grid => [...grid.querySelectorAll('.tile')].filter(t => !t.classList.contains('dragging'));
+  function placeTile(t, slot) {
+    t.dataset.slot = slot;
+    t.style.gridColumn = (slot % HOME_COLS) + 1;
+    t.style.gridRow = ((slot / HOME_COLS) | 0) + 1;
+  }
+  const tileAtSlot = (grid, slot) => gridTiles(grid).find(t => tileSlot(t) === slot) || null;
+  const maxSlotRow = grid => gridTiles(grid).reduce((m, t) => Math.max(m, (tileSlot(t) / HOME_COLS) | 0), -1);
+  // Map a viewport point to a slot index on `grid`. Columns split the width
+  // evenly; rows step by the fixed auto-row height + row gap. Droppable rows
+  // reach the bottom of the grid's visible area (its .sorting min-height), so
+  // you can land a tile anywhere in the open space you actually see — but never
+  // more than one fresh row past the last icon, so a drop can't open an absurd
+  // gap miles below the content.
+  function slotFromPoint(grid, x, y) {
+    const r = grid.getBoundingClientRect(), cs = getComputedStyle(grid);
+    const rowH = (parseFloat(cs.gridAutoRows) || 84) + (parseFloat(cs.rowGap) || 14);
+    let col = Math.floor((x - r.left) / (r.width / HOME_COLS));
+    let row = Math.floor((y - r.top) / rowH);
+    const maxRow = Math.max(Math.round(r.height / rowH) - 1, maxSlotRow(grid) + 1);
+    col = Math.max(0, Math.min(HOME_COLS - 1, col));
+    row = Math.max(0, Math.min(maxRow, row));
+    return row * HOME_COLS + col;
   }
   // Speculative pages spun up mid-drag by dragging into a screen edge; pruned
   // at drop if nothing landed on them, so an idle hover never litters pages.
-  let _dragNewPages = [];
+  let _dragNewPages = [], _dragNewPagePos = null;
   function addPageDuringDrag(pos) {
     if (_dragNewPages.length) return;   // one speculative page per drag is plenty
     const pager = $('#homePager'); if (!pager) return;
@@ -816,9 +1026,11 @@
     if (pos === 'start') pager.insertBefore(section, pager.firstElementChild);
     else pager.appendChild(section);
     const grid = section.querySelector('.tile-grid');
+    grid._blocked = new Set();          // a fresh page has no widgets on it
     grid.classList.add('sorting');
     enableTileSort(grid);
     _dragNewPages.push(grid);
+    _dragNewPagePos = pos;
     $$('#homePager .tile-grid').forEach((g, i) => { g.dataset.page = i; });
     const target = pos === 'start' ? 0 : $$('#homePager .tile-grid').length - 1;
     pager.scrollTo({ left: target * pager.clientWidth, behavior: 'smooth' });
@@ -829,11 +1041,27 @@
     // Only a page actually being added (or a speculative one pruned away)
     // needs a full rebuild, for the dots/pager chrome to catch up.
     const pageCountChanged = _dragNewPages.length > 0;
-    _dragNewPages.forEach(g => { if (!g.children.length) g.closest('.home-page').remove(); });
-    _dragNewPages = [];
+    const keptNew = _dragNewPages.filter(g => gridTiles(g).length);
+    _dragNewPages.forEach(g => { if (!gridTiles(g).length) g.closest('.home-page').remove(); });
+    // A page prepended at the start shifts every existing page index up one —
+    // the widgets' stored page anchors must follow or they'd jump a page left.
+    if (keptNew.length && _dragNewPagePos === 'start') {
+      const pos = widgetPos();
+      Object.values(pos).forEach(p => { if (p && typeof p === 'object') p.page = (p.page || 0) + 1; });
+      PREF.set('homeWidgets', pos);
+    }
+    _dragNewPages = []; _dragNewPagePos = null;
     const grids = $$('#homePager .tile-grid');
     grids.forEach((g, i) => { g.dataset.page = i; });
-    PREF.set('homePages', grids.map(g => [...g.querySelectorAll('.tile')].map(t => t.dataset.launch)));
+    // Persist each page as a slot array: index == slot, null == empty cell.
+    // Trailing empties are trimmed so we don't store an unbounded tail of nulls.
+    PREF.set('homePages', grids.map(g => {
+      const arr = [];
+      gridTiles(g).forEach(t => { arr[tileSlot(t)] = t.dataset.launch; });
+      for (let i = 0; i < arr.length; i++) if (arr[i] == null) arr[i] = null;
+      while (arr.length && arr[arr.length - 1] == null) arr.pop();
+      return arr;
+    }));
     if (pageCountChanged) renderHome();
   }
 
@@ -846,54 +1074,55 @@
         if (e.button) return;
         const start = { x: e.clientX, y: e.clientY };
         let moved = false, started = false, raf = null, lastEv = null, lastEdge = 0, baseLeft = 0, baseTop = 0;
-        let ghost = null;   // an inert placeholder that holds the tile's slot while it's lifted out
+        const srcGrid = tile.closest('.tile-grid'), srcSlot = tileSlot(tile);
+        let hint = null;                       // a soft outline of the target cell
+        let dropGrid = srcGrid, dropSlot = srcSlot;   // where a release lands right now
 
-        // A dragged tile is pulled OUT of the grid's layout flow (position:
-        // fixed, viewport coordinates) the instant the drag begins, and
-        // follows the pointer 1:1 in real screen pixels for as long as the
-        // drag lasts — that's what makes it free instead of "jumping between
-        // slots". Reordering happens on an invisible GHOST placeholder that
-        // takes the tile's spot in the grid, never on the tile itself: the
-        // tile is reparented to <body> exactly ONCE, before pointer capture
-        // is set, and never touched again until drop. Earlier this reordered
-        // the captured tile directly (insertBefore/appendChild on every
-        // hover) — reparenting an element mid-capture is what silently broke
-        // it: the browser stops delivering pointermove (or drops capture
-        // outright) the moment its ancestry changes, so the "drop" location
-        // never actually took — the tile just reverted to wherever it
-        // started, which read as "doesn't stay where I leave it".
+        // The dragged tile is lifted OUT of grid flow (position:fixed, viewport
+        // coordinates) the instant the drag begins and follows the pointer 1:1,
+        // so it moves freely instead of snapping between cells. Because every
+        // tile is placed at an EXPLICIT grid cell (grid-column/row), lifting
+        // this one leaves its cell empty and moves nothing else. It is NOT
+        // reparented (that's what used to drop pointer capture); it stays a
+        // child of its grid until it's committed to a slot on drop. Reordering
+        // is computed purely from geometry (slotFromPoint) — no elementFromPoint
+        // hit-testing on the moving tile, no sibling reflow.
         const beginDrag = () => {
           started = true;
           _dragNewPages = [];
           const r = tile.getBoundingClientRect();
           baseLeft = r.left; baseTop = r.top;
-          ghost = document.createElement('div');
-          ghost.className = 'tile tile-ghost';
-          ghost.style.width = r.width + 'px'; ghost.style.height = r.height + 'px';
-          tile.parentElement.insertBefore(ghost, tile);
-          document.body.appendChild(tile);
           tile.classList.add('dragging');
           Object.assign(tile.style, {
             position: 'fixed', left: baseLeft + 'px', top: baseTop + 'px',
             width: r.width + 'px', height: r.height + 'px', margin: '0',
             zIndex: 999, transform: 'scale(1.08)',
           });
+          hint = document.createElement('div');
+          hint.className = 'slot-hint';
           $$('#homePager .tile-grid').forEach(g => g.classList.add('sorting'));
           try { tile.setPointerCapture(e.pointerId); } catch (_) {}
         };
-        // One layout-touching pass per animation frame — the old code did
-        // elementFromPoint + getBoundingClientRect on every raw pointermove,
-        // which thrashes layout and is the other half of why drags felt janky.
+        const showHint = (g, slot) => {
+          if (hint.parentElement !== g) g.appendChild(hint);
+          placeTile(hint, slot);
+        };
+        // One layout pass per animation frame: move the tile to the pointer,
+        // then resolve which grid + slot a release would land in and preview it.
         const flush = () => {
           raf = null;
           if (!lastEv || !started) return;
           const ev = lastEv;
           tile.style.left = (baseLeft + ev.clientX - start.x) + 'px';
           tile.style.top = (baseTop + ev.clientY - start.y) + 'px';
+          // The dragged tile is pointer-events:none (see .tile.dragging), so
+          // this hit-tests the grid UNDERNEATH it, never itself.
+          const under = document.elementFromPoint(ev.clientX, ev.clientY);
+          const overGrid = (under && under.closest('.tile-grid')) || srcGrid;
           const pager = $('#homePager');
           if (pager) {
             const pr = pager.getBoundingClientRect(), now = Date.now();
-            const pages = $$('#homePager .tile-grid'), curIdx = pages.indexOf(ghost.closest('.tile-grid'));
+            const pages = $$('#homePager .tile-grid'), curIdx = pages.indexOf(overGrid);
             if (now - lastEdge > 550) {
               if (ev.clientX > pr.right - 34) {
                 lastEdge = now;
@@ -906,18 +1135,11 @@
               }
             }
           }
-          // both the dragged tile (fixed, on top) and the ghost (invisible)
-          // are already excluded from hit-testing, so no pointerEvents dance needed here
-          const under = document.elementFromPoint(ev.clientX, ev.clientY);
-          const overTile = under && under.closest('.tile');
-          const overGrid = under && under.closest('.tile-grid');
-          if (overTile && overTile !== ghost) {                        // reorder / cross-page insert
-            const g = overTile.parentElement, r = overTile.getBoundingClientRect();
-            const after = ev.clientY > r.top + r.height / 2 || ev.clientX > r.left + r.width / 2;
-            flipReorder(g, () => g.insertBefore(ghost, after ? overTile.nextSibling : overTile));
-          } else if (overGrid && overGrid !== ghost.parentElement) {   // move to another page's empty area
-            flipReorder(overGrid, () => overGrid.appendChild(ghost));
-          }
+          dropGrid = overGrid;
+          // never land under a widget: snap to the nearest unblocked cell
+          dropSlot = freeSlotNear(slotFromPoint(overGrid, ev.clientX, ev.clientY),
+                                  overGrid._blocked || new Set());
+          showHint(overGrid, dropSlot);
         };
         // In edit mode a small move starts the drag immediately. Not yet in
         // edit mode, a long-press enters it AND begins the drag on the exact
@@ -942,15 +1164,25 @@
           window.removeEventListener('pointerup', up);
           if (raf) { cancelAnimationFrame(raf); raf = null; }
           if (!started) return;
+          if (hint) hint.remove();
+          // Commit the tile to the target slot. If that cell is taken, the
+          // sitting tile swaps back into the source slot — a clean exchange
+          // that leaves every OTHER tile exactly where it was (no repack).
+          // Resolve the occupant while the tile still carries .dragging so
+          // gridTiles() cleanly excludes the one in flight.
+          const occupant = tileAtSlot(dropGrid, dropSlot);
           tile.classList.remove('dragging');
           $$('#homePager .tile-grid').forEach(g => g.classList.remove('sorting'));
-          // Drop the real tile into the ghost's slot — the ONLY other
-          // reparent of the tile all drag long — then release the
-          // free-floating position and fly it there with a mini FLIP so it
-          // settles smoothly instead of teleporting.
+          if (occupant && occupant !== tile) {
+            placeTile(occupant, srcSlot);
+            if (occupant.parentElement !== srcGrid) srcGrid.appendChild(occupant);
+          }
           const before = tile.getBoundingClientRect();
-          ghost.replaceWith(tile);
           Object.assign(tile.style, { position: '', left: '', top: '', width: '', height: '', margin: '', zIndex: '' });
+          placeTile(tile, dropSlot);
+          if (tile.parentElement !== dropGrid) dropGrid.appendChild(tile);
+          // Mini-FLIP: fly from where it was released to the slot it locked into
+          // so it settles smoothly instead of teleporting.
           const after = tile.getBoundingClientRect();
           tile.style.transition = 'none';
           tile.style.transform = `translate(${before.left - after.left}px,${before.top - after.top}px) scale(1.08)`;
@@ -1270,6 +1502,14 @@
     // data-launch on focus card + tiles; bindLaunchers also wires
     // data-nav (All apps) and data-cut (Cut off) via bindNav.
     bindLaunchers($('#v-home'));
+    // Widgets open their own settings (the iOS pattern): the clock opens
+    // Clock & widgets, the weather reading opens Weather, the date opens the
+    // Calendar. Only outside edit mode — there, these gestures drag/resize.
+    if (!S.homeEdit) {
+      const ck = $('#homeClock'); if (ck) ck.onclick = () => go('pz-clock');
+      const wx = $('#homeWx');    if (wx) wx.onclick = () => go('pz-weather');
+      const dt = $('#v-home .aura-date'); if (dt) dt.onclick = () => go('calendar');
+    }
   }
 
   /* ======================================================================
@@ -1292,6 +1532,7 @@
   // and cached. This is what makes Ubuntu's own apps (Software, Text Editor,
   // LibreOffice, …) live inside the OS's launcher.
   let INSTALLED = null, _androidApps = null, _srch = null;
+  let _drawerCat = 'All';   // the app library's selected shelf (chips row)
   const catIcon = cats => {
     const c = (cats || []).map(x => x.toLowerCase());
     if (c.some(x => /audio|video|music|player/.test(x))) return 'music';
@@ -1315,6 +1556,11 @@
       { label: 'Display', sub: 'Brightness', icon: 'sun', kw: 'brightness screen light', run: () => go('sys-display') },
       { label: 'Sound', sub: 'Volume', icon: 'vol', kw: 'volume audio mute loud', run: () => go('sys-sound') },
       { label: 'Date & time', sub: 'Timezone & clock', icon: 'clock', kw: 'timezone', run: () => go('sys-datetime') },
+      { label: 'Notifications', sub: 'Do Not Disturb & lock screen', icon: 'bell', kw: 'dnd silence alerts banners lock content', run: () => go('sys-notifications') },
+      { label: 'App Store', sub: 'Install free & open apps', icon: 'store', kw: 'install fdroid android download apps', run: () => go('appstore') },
+      { label: 'Clock & widgets', sub: 'Home clock style, size & widgets', icon: 'clock', kw: 'widget clock style size up next terminal', run: () => go('pz-clock') },
+      { label: 'Wallpaper', sub: 'Backgrounds & the daily image', icon: 'photo', kw: 'background daily image photo contrast', run: () => go('pz-wallpaper') },
+      { label: 'Ambience', sub: 'Live effects & Night Light', icon: 'spark', kw: 'effects aurora starfield rain night light motion', run: () => go('pz-fx') },
       { label: 'About', sub: 'Device, OS, hardware', icon: 'info', kw: 'version kernel cpu hostname', run: () => go('sys-about') },
       { label: 'System Monitor', sub: 'CPU, memory, processes', icon: 'chart', kw: 'cpu ram load processes performance', run: () => go('sys-monitor') },
       { label: 'Storage', sub: 'Disks & usage', icon: 'disk', kw: 'disk space filesystem', run: () => go('sys-storage') },
@@ -1413,8 +1659,16 @@
     const apps = Sov.apps().filter(a => !q || a.name.toLowerCase().includes(q));
     const cats = {};
     apps.forEach(a => { (cats[a.cat] = cats[a.cat] || []).push(a); });
+    // A tidy library: alphabetical inside each shelf, and (when not searching)
+    // one row of category chips to jump straight to a shelf.
+    Object.values(cats).forEach(l => l.sort((a, b) => a.name.localeCompare(b.name)));
+    const catNames = Object.keys(cats);
+    const hasInst = !!((INSTALLED && INSTALLED.length) || (_androidApps && _androidApps.length));
+    const showCat = q ? 'All' : ((_drawerCat === 'Installed' && hasInst) || catNames.includes(_drawerCat) ? _drawerCat : 'All');
 
-    const grid = Object.entries(cats).map(([cat, list]) => `
+    const grid = Object.entries(cats)
+      .filter(([cat]) => showCat === 'All' || showCat === cat)
+      .map(([cat, list]) => `
           <div class="lx-cat">${esc(cat)}</div>
           <div class="app-grid">${list.map(a => appIcon(a)).join('')}</div>`).join('');
 
@@ -1445,8 +1699,11 @@
       .filter(a => a && a.package && (!q || (a.name || '').toLowerCase().includes(q)))
       .map(a => appRow(`data-launch="android:${esc(a.package)}"`, Sov.appIconUrl('waydroid.' + a.package), 'android', a.name || a.package, 'App'));
     const allRows = [...nativeRows, ...androidRows];
-    const instHTML = allRows.length
-      ? `<div class="lx-cat">Apps · ${allRows.length}</div><div class="card">${allRows.join('')}</div>` : '';
+    const instHTML = allRows.length && (showCat === 'All' || showCat === 'Installed')
+      ? `<div class="lx-cat">Installed on this device · ${allRows.length}</div><div class="card">${allRows.join('')}</div>` : '';
+    const chipsHTML = q ? '' : `<div class="chips lx-chips">${
+      ['All', ...catNames, ...(hasInst ? ['Installed'] : [])].map(c =>
+        `<button class="chip ${showCat === c ? 'on' : ''}" data-lxcat="${esc(c)}">${esc(c)}</button>`).join('')}</div>`;
 
     // Deep search: your actual content — notes, events, messages, music, photos.
     // Each result opens the right place.
@@ -1477,10 +1734,13 @@
     $('#drawerScroll').innerHTML = `
       <div class="lx-search">${ic('search',18)}
         <input id="lxInput" placeholder="Search apps, contacts, notes, files…" value="${esc(filter)}" autocomplete="off"></div>
-      ${grid}${instHTML}${deepHTML}<div id="srchFiles"></div>${spotHTML}${nothing}
+      ${chipsHTML}${grid}${instHTML}${deepHTML}<div id="srchFiles"></div>${spotHTML}${nothing}
     `;
     const input = $('#lxInput');
     input.oninput = () => renderDrawer(input.value);
+    $('#drawerScroll').querySelectorAll('[data-lxcat]').forEach(b => b.onclick = () => {
+      _drawerCat = b.dataset.lxcat; renderDrawer('');
+    });
     input.onkeydown = e => e.stopPropagation();
     if (filter) { input.focus(); input.setSelectionRange(filter.length, filter.length); }
     else if (S.focusSearch) { S.focusSearch = false; input.focus(); }
@@ -1651,8 +1911,8 @@
         <span class="muted" style="font-size:11px">Cut every app off, instantly</span></div>
       <div class="toggle-grid">
         ${guard('mic', 'mic', 'micOff', 'Microphone')}
-        ${guard('cam', 'cam', 'micOff', 'Camera')}
-        ${guard('loc', 'loc', 'loc', 'Location')}
+        ${guard('cam', 'cam', 'camOff', 'Camera')}
+        ${guard('loc', 'loc', 'locOff', 'Location')}
         <button class="tgl" data-nav="permissions" data-close-control="1">
           <span class="tgl-ic">${ic('shieldChk',22)}</span>
           <span class="tgl-txt"><div class="tgl-lbl">Permissions</div>
@@ -1724,8 +1984,8 @@
 
   // Long-press a quick-settings tile to jump straight to its full settings
   // page (the classic iOS/Android shortcut) — a quick tap still just toggles.
-  const TGL_ROUTE = { wifi: 'sys-wifi', bluetooth: 'sys-bluetooth', vpn: 'settings',
-    dnd: 'settings', night: 'personalize', wwan: 'sys-wifi', airplane: 'sys-wifi' };
+  const TGL_ROUTE = { wifi: 'sys-wifi', bluetooth: 'sys-bluetooth', vpn: 'network',
+    dnd: 'sys-notifications', night: 'pz-fx', wwan: 'sys-wifi', airplane: 'sys-wifi' };
   const GUARD_ROUTE = 'permissions';
   function wireTileLongPress(body) {
     body.querySelectorAll('[data-toggle], [data-guard]').forEach(b => {
@@ -1971,6 +2231,50 @@
   }
 
   /* ======================================================================
+     NOTIFICATIONS SETTINGS — DND, lock-screen content, history
+     (exposes Sov.notify's showOnLock switch, which had no UI before)
+     ====================================================================== */
+  function renderNotifSettings() {
+    const dnd = Sov.notify.dnd();
+    const showLock = Sov.notify.showOnLock();
+    const list = Sov.notify.list();
+    $('#screenScroll').innerHTML = `
+      ${shead('Device', 'Notifications', 'Notifications are produced on this device and never leave it. Every entry names its source app.')}
+      <div class="card">
+        <button class="row tappable" data-nf-dnd style="width:100%;text-align:left"><span class="glyph">${ic('bell',20)}</span>
+          <span class="rtext"><div class="rtitle">Do Not Disturb</div>
+            <div class="rsub">Silence new notifications — the shade still collects them</div></span>
+          <span class="switch ${dnd ? 'on' : ''}"></span></button>
+        <button class="row tappable" data-nf-lock style="width:100%;text-align:left"><span class="glyph">${ic('lock',20)}</span>
+          <span class="rtext"><div class="rtitle">Show content on lock screen</div>
+            <div class="rsub">Off keeps the content hidden until you unlock — the aura default</div></span>
+          <span class="switch ${showLock ? 'on' : ''}"></span></button>
+      </div>
+      <div class="section-head"><span class="eyebrow">History</span>
+        <span class="muted" style="font-size:11px">${list.length} notification${list.length === 1 ? '' : 's'}</span></div>
+      <div class="card">
+        ${list.length
+          ? `<button class="row tappable" data-nf-clear style="width:100%;text-align:left">
+               <span class="glyph" style="color:var(--alert)">${ic('trash',18)}</span>
+               <span class="rtext"><div class="rtitle" style="color:var(--alert)">Clear all notifications</div></span></button>`
+          : `<div class="row muted">Nothing right now — you're all caught up.</div>`}
+      </div>
+      <div style="height:8px"></div>`;
+    const rerender = () => { if (stillOn('sys-notifications')) renderNotifSettings(); };
+    $('#screenScroll').querySelector('[data-nf-dnd]').onclick = () => {
+      const now = !Sov.notify.dnd();
+      Sov.notify.dnd(now);
+      toast(now ? 'Do Not Disturb on' : 'Do Not Disturb off', now ? 'warn' : 'ok', 'bell');
+      renderPane(Sov.get()); rerender();
+    };
+    $('#screenScroll').querySelector('[data-nf-lock]').onclick = () => {
+      Sov.notify.showOnLock(!Sov.notify.showOnLock()); rerender();
+    };
+    const clr = $('#screenScroll').querySelector('[data-nf-clear]');
+    if (clr) clr.onclick = () => { Sov.notify.clear(); renderPane(Sov.get()); rerender(); };
+  }
+
+  /* ======================================================================
      SETTINGS (hub)
      ====================================================================== */
   function renderSettings() {
@@ -1982,21 +2286,6 @@
         <div><div class="ab-name">AuraOS</div>
           <div class="ab-ver">v1.0 · ${st.mode === 'live' ? 'device' : 'preview'}</div></div>
       </div>
-      <div class="section-head"><span class="eyebrow">Intelligence</span></div>
-      <div class="card">
-        ${srow('spark', 'Assistant', 'Ask the on-device AI', 'assistant')}
-        ${srow('brain', 'AI Engine', 'Local models, memory, trust', 'sys-ai')}
-      </div>
-      <div class="section-head"><span class="eyebrow">Apps</span></div>
-      <div class="card">
-        ${srow('android', 'Android apps', 'Run Android apps natively · Waydroid', 'sys-android')}
-      </div>
-      <div class="section-head"><span class="eyebrow">System</span></div>
-      <div class="card">
-        ${srow('info', 'About', 'Device, OS, hardware', 'sys-about')}
-        ${srow('chart', 'System Monitor', 'CPU, memory, processes', 'sys-monitor')}
-        ${srow('disk', 'Storage', 'Disks and usage', 'sys-storage')}
-      </div>
       <div class="section-head"><span class="eyebrow">Connectivity</span></div>
       <div class="card">
         ${srow('wifi', 'Wi-Fi', st.net.wifi ? esc(st.net.ssid) : 'Off', 'sys-wifi')}
@@ -2007,6 +2296,7 @@
         ${srow('grid', 'Personalize', 'Wallpaper, home layout, focus', 'personalize')}
         ${srow('sun', 'Display', st.brightness + '% brightness', 'sys-display')}
         ${srow('vol', 'Sound', st.volume + '% volume', 'sys-sound')}
+        ${srow('bell', 'Notifications', Sov.notify.dnd() ? 'Do Not Disturb on' : 'On', 'sys-notifications')}
         ${srow('clock', 'Date & time', st.time, 'sys-datetime')}
       </div>
       <div class="section-head"><span class="eyebrow">Privacy &amp; security</span></div>
@@ -2014,6 +2304,22 @@
         ${srow('shieldChk', 'Permissions', 'What every app can access', 'permissions')}
         ${srow('globe', 'Network', 'Connections &amp; blocking', 'network')}
         ${srow('lock', 'Vault', 'Encrypted storage', 'vault')}
+      </div>
+      <div class="section-head"><span class="eyebrow">Intelligence</span></div>
+      <div class="card">
+        ${srow('spark', 'Assistant', 'Ask the on-device AI', 'assistant')}
+        ${srow('brain', 'AI Engine', 'Local models, memory, trust', 'sys-ai')}
+      </div>
+      <div class="section-head"><span class="eyebrow">Apps</span></div>
+      <div class="card">
+        ${srow('store', 'App Store', 'Install free &amp; open Android apps', 'appstore')}
+        ${srow('android', 'Android apps', 'Run Android apps natively · Waydroid', 'sys-android')}
+      </div>
+      <div class="section-head"><span class="eyebrow">System</span></div>
+      <div class="card">
+        ${srow('info', 'About', 'Device, OS, hardware', 'sys-about')}
+        ${srow('chart', 'System Monitor', 'CPU, memory, processes', 'sys-monitor')}
+        ${srow('disk', 'Storage', 'Disks and usage', 'sys-storage')}
       </div>
       <div class="section-head"><span class="eyebrow">Advanced</span></div>
       <div class="card">
@@ -3647,6 +3953,19 @@
           <div class="seg">${GLASS_MODES.map(g =>
             `<button class="${(PREF.get('glass','glass')) === g.id ? 'on acc' : ''}" data-glassmode="${g.id}">${g.name}</button>`).join('')}</div></div>
       </div>
+      <div class="section-head"><span class="eyebrow">Typeface</span>
+        <span class="muted" style="font-size:11px">the whole system's font</span></div>
+      <div class="font-grid">${FONTS.map(f => `
+        <button class="font-chip ${f.id === fontFace() ? 'on' : ''}" data-font="${f.id}" style="font-family:${f.stack}">
+          <span class="fc-ag">Ag</span>
+          <span class="fc-meta"><span class="fc-name">${f.name}</span><span class="fc-sub">${f.sub}</span></span>
+        </button>`).join('')}</div>
+      <div class="card">
+        <div class="row"><span class="glyph">${ic('search',18)}</span>
+          <span class="rtext"><div class="rtitle">Text size</div><div class="rsub">Menus, apps, lock &amp; controls</div></span>
+          <div class="seg">${FONT_SIZES.map(s =>
+            `<button class="${s.id === fontSizeId() ? 'on acc' : ''}" data-fontsize="${s.id}">${s.name}</button>`).join('')}</div></div>
+      </div>
       <div class="section-head"><span class="eyebrow">Insight margin</span>
         <span class="muted" style="font-size:11px">privacy &amp; status handle</span></div>
       <div class="card">
@@ -3668,6 +3987,12 @@
     });
     $('#screenScroll').querySelectorAll('[data-glassmode]').forEach(b => b.onclick = () => {
       PREF.set('glass', b.dataset.glassmode); applyAppearance(); renderPzLook();
+    });
+    $('#screenScroll').querySelectorAll('[data-font]').forEach(b => b.onclick = () => {
+      PREF.set('fontFace', b.dataset.font); applyFont(); renderPzLook();
+    });
+    $('#screenScroll').querySelectorAll('[data-fontsize]').forEach(b => b.onclick = () => {
+      PREF.set('fontSize', b.dataset.fontsize); applyFont(); renderPzLook();
     });
     $('#screenScroll').querySelectorAll('[data-insside]').forEach(b => b.onclick = () => {
       PREF.set('insSide', b.dataset.insside); applyInsightSide(); updateInsight(); renderPzLook();
@@ -3828,8 +4153,8 @@
           <span class="rtext"><div class="rtitle">Size</div><div class="rsub">Or drag its corner handle while editing home</div></span>
           <div class="seg">${[['small',.85],['regular',1],['large',1.3]].map(([n,v]) =>
             `<button class="${Math.abs(clockScale()-v)<.03 ? 'on acc' : ''}" data-clkscale="${v}">${cap(n)}</button>`).join('')}</div></div>
-        ${clockY() || PREF.get('clockScale', null) ? `<button class="row tappable" data-clkreset style="width:100%;text-align:left"><span class="glyph">${ic('restart',18)}</span>
-          <span class="rtext"><div class="rtitle">Reset position &amp; size</div><div class="rsub">Put the clock back where it started</div></span></button>` : ''}
+        ${PREF.get('homeWidgets', null) || PREF.get('clockScale', null) || PREF.get('clockFree', false) ? `<button class="row tappable" data-clkreset style="width:100%;text-align:left"><span class="glyph">${ic('restart',18)}</span>
+          <span class="rtext"><div class="rtitle">Reset position &amp; size</div><div class="rsub">Back to the top row · drag widgets while editing home to place them on any row</div></span></button>` : ''}
       </div>
       <div class="section-head"><span class="eyebrow">Home widgets</span>
         <span class="muted" style="font-size:11px">real data, or nothing at all</span></div>
@@ -3860,7 +4185,10 @@
     });
     const ckr = $('#screenScroll').querySelector('[data-clkreset]');
     if (ckr) ckr.onclick = () => {
-      PREF.set('clockY', 0); PREF.set('clockScale', null); renderPzClock(); toast('Clock reset', 'ok', 'check');
+      PREF.set('homeWidgets', null); PREF.set('clockScale', null);
+      // clear the legacy free-float keys too, so the migration never resurrects them
+      PREF.set('clockFree', false); PREF.set('clockY', 0); PREF.set('clockPX', 50); PREF.set('clockPY', 15);
+      renderHome(); renderPzClock(); toast('Widgets reset', 'ok', 'check');
     };
     const unx = $('#screenScroll').querySelector('[data-upnexttgl]');
     if (unx) unx.onclick = () => { PREF.set('upnext', !PREF.get('upnext', true)); renderPzClock(); };
@@ -3926,18 +4254,25 @@
       <div class="pa-note">${hPages.length} page${hPages.length > 1 ? 's' : ''} · assign each app to a page or take it off home · swipe between pages on the home screen, drag tiles to reorder</div>
       <div class="card">${appRows}</div>
       <div style="height:8px"></div>`;
+    // Pages are fixed-slot arrays (index == grid cell, null == a kept gap), so
+    // removing an app must empty its slot IN PLACE — filtering would shift
+    // every later icon up a cell and scramble the user's arrangement.
+    const emptySlot = (pgs, id) => pgs.map(p => (p || []).map(x => x === id ? null : x));
     $('#focusSel').onchange = e => {
       PREF.set('focus', e.target.value);
       // the focus is the hero card, so pull it out of the page grids
-      const pgs = homePagesIds().map(p => (p || []).filter(id => id !== e.target.value));
-      PREF.set('homePages', pgs);
+      PREF.set('homePages', emptySlot(homePagesIds(), e.target.value));
       renderPzApps();
       toast('Home focus set', 'ok', 'check');
     };
     $('#screenScroll').querySelectorAll('[data-appage]').forEach(s => s.onchange = () => {
       const id = s.dataset.appage, target = parseInt(s.value, 10);
-      let pgs = homePagesIds().map(p => (p || []).filter(x => x !== id));   // off every page
-      if (target >= 0) { while (pgs.length <= target) pgs.push([]); pgs[target].push(id); }
+      const pgs = emptySlot(homePagesIds(), id);   // off its old slot, gap kept
+      if (target >= 0) {
+        while (pgs.length <= target) pgs.push([]);
+        const pg = pgs[target], gap = pg.indexOf(null);   // fill a gap before growing
+        if (gap !== -1) pg[gap] = id; else pg.push(id);
+      }
       PREF.set('homePages', pgs); renderPzApps();
     });
     const ap = $('#addPage');
@@ -4241,6 +4576,7 @@
     'sys-display':  { render: renderDisplay },
     'sys-sound':    { render: renderSound },
     'sys-datetime': { render: renderDatetime },
+    'sys-notifications': { render: renderNotifSettings },
     'sys-power':    { render: renderPower },
     terminal:       { render: renderTerminal },
     files:          { render: renderFiles },
@@ -5294,6 +5630,7 @@
     applyEffects();
     applyIconStyle();
     applyAppearance();
+    applyFont();
     refreshWeather();   // no-op unless the user enabled Live weather
     // keep the reading current while enabled (refreshWeather itself is
     // 15-min-cached, so this costs nothing extra between refreshes)

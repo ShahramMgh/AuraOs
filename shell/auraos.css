@@ -55,10 +55,11 @@
   --sig-cam:   #F2635F;
   --sig-loc:   #35BCEE;
 
+  /* Rounder, softer corners across the system — the "glassy sheet" language. */
   --r-xs: 6px;
-  --r-sm: 10px;
-  --r-md: 14px;
-  --r-lg: 22px;
+  --r-sm: 11px;
+  --r-md: 16px;
+  --r-lg: 26px;
 
   /* Elevation — one soft ambient shadow + a 1px light catch on top edges. */
   --edge:      inset 0 1px 0 rgba(255, 255, 255, .045);
@@ -323,7 +324,12 @@ input  { font: inherit; }
   display: flex; align-items: center; gap: 12px;
   padding: 13px 14px;
 }
-.row + .row { border-top: 1px solid var(--line); }
+/* Inset separators (iOS-style): the hairline starts after the leading glyph,
+   so grouped lists read as one glass sheet rather than stacked boxes. */
+.row + .row {
+  border-top: 1px solid var(--line);
+  border-image: linear-gradient(to right, transparent 48px, var(--line) 48px) 1;
+}
 .row .glyph { flex: 0 0 22px; color: var(--text-2); }
 /* An installed app's own icon (native or Android), shown in place of the glyph. */
 .row .glyph .app-ico-img { width: 22px; height: 22px; border-radius: 5px; object-fit: cover; display: block; }
@@ -517,7 +523,28 @@ input  { font: inherit; }
 
 /* ---- the Aura: the living companion at the top of home ---- */
 .home2-body { padding-top: 14px; }
-.aura-hero { display: flex; flex-direction: column; align-items: center; padding: 4px 0 10px; }
+.aura-hero { display: flex; flex-direction: column; align-items: center; padding: 4px 0 6px; }
+
+/* ---- home widgets: full-width grid residents -------------------------------
+   Widgets (clock hero · focus card · Up next) live INSIDE the page's slot
+   grid, spanning all columns at an explicit row (grid-row set inline). One
+   positioning system for icons and widgets alike — nothing can overlap,
+   because widget-covered cells are blocked for icons (homeLayout repairs any
+   collision) and contested widget rows are pushed apart. */
+.home-widget {
+  position: relative; min-width: 0;
+  display: flex; flex-direction: column; justify-content: center;
+}
+.home-widget .aura-hero { width: 100%; }
+/* edit mode: the widget is a draggable block — its inner controls stand down
+   (so a grab can start anywhere on it), except the clock's size handle */
+.home2-body.editing .home-widget { cursor: grab; touch-action: none; border-radius: 18px;
+  outline: 1.5px dashed color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 4px;
+  background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.home2-body.editing .home-widget * { pointer-events: none; }
+.home2-body.editing .home-widget .clk-resize { pointer-events: auto; }
+.home-widget.dragging { z-index: 40; opacity: .95; cursor: grabbing; transition: none; }
+.home2-body.anim .home-widget { animation: heroIn .6s var(--ease) backwards; }
 .aura-canvas {
   width: 200px; height: 200px; display: block;
   touch-action: manipulation; cursor: pointer;
@@ -534,13 +561,17 @@ input  { font: inherit; }
   animation: clockSheen 9s var(--ease) infinite;   /* a slow light sweep across the time */
 }
 @keyframes clockSheen { 0%, 100% { background-position: 100% 0; } 50% { background-position: 0 0; } }
-.aura-date { margin-top: 8px; font-size: 12.5px; color: var(--text-2); }
+.aura-date { margin-top: 8px; font-size: 12.5px; color: var(--text-2); cursor: pointer; }
+.aura-date:active { color: var(--text-1); }
 /* the live weather reading (opt-in), a quiet line under the date */
 .aura-wx { display: none; }
 .aura-wx.on {
   display: inline-flex; align-items: center; gap: 6px; margin-top: 7px;
-  font-size: 12px; color: var(--text-1);
+  font-size: 12px; color: var(--text-1); cursor: pointer;
 }
+.aura-wx.on:active { color: var(--text-0); }
+/* the clock itself is a shortcut to its own settings (outside edit mode) */
+.home2-body:not(.editing) .clockw { cursor: pointer; }
 .aura-wx svg { color: color-mix(in srgb, var(--accent) 75%, #fff); }
 .aura-hero.align-left .aura-wx, .aura-hero.align-left .aura-date { align-self: flex-start; }
 .aura-hero.align-right .aura-wx, .aura-hero.align-right .aura-date { align-self: flex-end; }
@@ -606,17 +637,14 @@ input  { font: inherit; }
    extra layout space, so a bigger clock would sit on top of whatever's below
    it. zoom actually grows the box, so the date/status/widgets/tiles below
    push down and reflow on their own — no manual spacing math needed. */
-.clockw { zoom: var(--clock-scale, 1); margin-top: var(--clock-dy, 0px); }
+.clockw { zoom: var(--clock-scale, 1); }
 .aura-hero.align-right { align-items: flex-end; text-align: right; padding-right: 6px; }
 .aura-hero.align-right .aura-status { align-self: flex-end; }
 .aura-hero.align-right .cw-stacked { align-items: flex-end; }
 .aura-hero.align-right .cw-words .cl-words { text-align: right; }
-/* in edit mode the clock reads as a draggable, resizable widget */
-.home2-body.editing .clockw {
-  cursor: grab; touch-action: none; border-radius: 14px;
-  outline: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 10px;
-}
-.home2-body.editing .clockw:active { cursor: grabbing; }
+/* in edit mode the WIDGET carries the dashed frame (see .home-widget); the
+   clock itself only keeps its resize affordance */
+.home2-body.editing .clockw { touch-action: none; }
 .clk-resize {
   display: none; position: absolute; right: -8px; bottom: 4px;
   width: 24px; height: 24px; border-radius: 50%; align-items: center; justify-content: center;
@@ -645,6 +673,8 @@ input  { font: inherit; }
 .clk-chip .wp-chk { position: absolute; top: 9px; right: 10px; color: var(--accent); }
 
 /* ---- "Up next" widget: the next real calendar event, glass row ---- */
+.upnext-slot { width: 100%; }
+.home-widget .upnext { margin-top: 0; }
 .upnext {
   width: 100%; display: flex; align-items: center; gap: 12px;
   margin-top: 12px; padding: 11px 14px; border-radius: 16px; text-align: left;
@@ -695,8 +725,26 @@ input  { font: inherit; }
 .focus-card.using { border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 
 /* app tiles — glass squircles, subtly tinted, white icons */
-.tile-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px 10px; margin-top: 22px; }
+/* Fixed-slot home grid: tiles are placed at explicit cells (grid-column/row via
+   data-slot), so nothing auto-flows or repacks. grid-auto-rows gives every row —
+   even an empty one between icons — a full, constant height, so a gap you leave
+   reserves real space instead of collapsing. See enableTileSort()/homeTile(). */
+.tile-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: 84px; column-gap: 10px; row-gap: 14px;
+  align-items: start; align-content: start; margin-top: 6px;
+  flex: 1 1 auto;   /* fill the page: rows are droppable top to bottom */
+}
+/* While dragging, guarantee a few empty rows of droppable area below the icons
+   (and give a brand-new empty page real height) so you can drop into open space. */
+.tile-grid.sorting { min-height: 310px; }
 .tile { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+/* the outlined cell that previews where a released tile will land */
+.slot-hint {
+  pointer-events: none; align-self: stretch; height: 66px; margin-top: 2px;
+  border-radius: 18px; border: 2px dashed color-mix(in srgb, var(--accent) 55%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
 .tile-ic {
   position: relative; width: 58px; height: 58px; border-radius: 18px;
   display: flex; align-items: center; justify-content: center; color: #fff;
@@ -753,10 +801,8 @@ input  { font: inherit; }
 /* Only under .anim (set on navigation to home), so the ~20s live re-renders
    don't re-pop. Entrance transforms live on the .tile container, leaving the
    .tile-ic hover/press transforms untouched. */
-.home2-body.anim .aura-hero  { animation: heroIn .6s var(--ease) backwards; }
+/* widgets (clock hero, focus card, Up next) settle as whole blocks */
 .home2-body.anim #suggestSlot { animation: heroIn .55s var(--ease) backwards .04s; }
-.home2-body.anim #upnextSlot  { animation: heroIn .55s var(--ease) backwards .05s; }
-.home2-body.anim .focus-card  { animation: heroIn .6s var(--ease) backwards .06s; }
 .home2-body.anim:not(.editing) .tile {
   animation: tilePop .5s var(--spring) backwards;
   animation-delay: calc(var(--i, 0) * 34ms + 90ms);
@@ -803,8 +849,8 @@ input  { font: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .home2-aura::before, .home2-aura::after { animation: none; }
   .aura-time { animation: none; }
-  .home2-body.anim .aura-hero, .home2-body.anim #suggestSlot, .home2-body.anim #upnextSlot,
-  .home2-body.anim .focus-card, .home2-body.anim:not(.editing) .tile { animation: none; }
+  .home2-body.anim .home-widget, .home2-body.anim #suggestSlot,
+  .home2-body.anim:not(.editing) .tile { animation: none; }
   .tile-glow, .tile-ic { transition: none; }
 }
 
@@ -812,10 +858,12 @@ input  { font: inherit; }
 .tile { touch-action: manipulation; }
 .tile-grid.sorting { touch-action: none; }
 .tile-grid.sorting .tile { cursor: grab; }
-.tile.dragging { z-index: 50; opacity: .96; cursor: grabbing; }
-/* the invisible placeholder that holds a dragged tile's grid slot — see
-   enableTileSort's beginDrag() for why the real tile never re-parents mid-drag */
-.tile-ghost { opacity: 0; pointer-events: none; }
+/* pointer-events:none is load-bearing: the dragged tile is position:fixed and
+   rides directly under the pointer, so without this flush()'s elementFromPoint
+   would hit the tile itself instead of the grid beneath it — and the drop
+   target under the finger could never be resolved. Excluding it lets the grid
+   underneath show through to the hit-test, which is what flush() assumes. */
+.tile.dragging { z-index: 50; opacity: .96; cursor: grabbing; pointer-events: none; }
 .tile.dragging .tile-ic {
   box-shadow: 0 20px 40px -14px rgba(0, 0, 0, .85),
               0 0 0 2px color-mix(in srgb, var(--col) 55%, transparent),
@@ -898,6 +946,7 @@ input  { font: inherit; }
 }
 .lx-search input::placeholder { color: var(--text-3); }
 .lx-cat { font-family: var(--mono); font-size: 10px; letter-spacing: .18em; text-transform: uppercase; color: var(--text-2); margin: 20px 4px 10px; }
+.lx-chips { margin: 10px 2px 0; padding-bottom: 2px; }
 .lx-item { display: flex; align-items: center; gap: 13px; padding: 11px 8px; border-radius: var(--r-sm); transition: background .15s; }
 .lx-item:active { background: var(--s1); }
 .lx-item .lx-badge {
@@ -917,9 +966,9 @@ input  { font: inherit; }
   position: absolute; z-index: 60;
   left: 0; right: 0; top: 0;
   background:
-    linear-gradient(180deg, rgba(10, 18, 28, .82), rgba(5, 9, 15, .88));
-  backdrop-filter: blur(26px) saturate(1.4);
-  -webkit-backdrop-filter: blur(26px) saturate(1.4);
+    linear-gradient(180deg, rgba(12, 21, 32, .68), rgba(6, 10, 17, .8));
+  backdrop-filter: blur(38px) saturate(1.7);
+  -webkit-backdrop-filter: blur(38px) saturate(1.7);
   border-bottom: 1px solid var(--line-hi);
   border-radius: 0 0 var(--r-lg) var(--r-lg);
   box-shadow: 0 30px 80px -20px rgba(0, 0, 0, .9);
@@ -937,11 +986,11 @@ input  { font: inherit; }
 .toggle-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .tgl {
   display: flex; align-items: center; gap: 11px;
-  padding: 13px; border-radius: var(--r-md);
-  border: 1px solid var(--line);
+  padding: 13px; border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, .08);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, .03), rgba(255, 255, 255, 0)),
-    rgba(16, 29, 44, .55);
+    linear-gradient(180deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, 0) 55%),
+    rgba(16, 29, 44, .42);
   box-shadow: var(--edge);
   transition: border-color .25s, background .25s, box-shadow .25s, transform .2s var(--spring);
 }
@@ -1032,14 +1081,17 @@ input  { font: inherit; }
 .perm-app-head .pa-name { color: var(--text-0); font-size: 15px; }
 .perm-app-head .pa-sub { color: var(--text-2); font-size: 12px; font-family: var(--mono); }
 .perm-line { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
-.perm-line + .perm-line { border-top: 1px solid var(--line); }
+.perm-line + .perm-line {
+  border-top: 1px solid var(--line);
+  border-image: linear-gradient(to right, transparent 46px, var(--line) 46px) 1;
+}
 .perm-line .pl-ic { color: var(--text-2); flex: 0 0 20px; }
 .perm-line .pl-name { flex: 1; color: var(--text-1); font-size: 14px; }
 
 /* segmented Allow / Ask / Deny */
 .seg {
   display: inline-flex; border: 1px solid var(--line);
-  border-radius: var(--r-sm); overflow: hidden;
+  border-radius: 999px; overflow: hidden;   /* pill, iOS segmented-control style */
   background: rgba(4, 7, 12, .45);
 }
 .seg button { padding: 6px 11px; font-size: 12px; color: var(--text-2); font-family: var(--mono); transition: background .15s, color .15s; }
@@ -1207,10 +1259,17 @@ input  { font: inherit; }
    frame's overflow:hidden. Margin on every side + full rounding clears it
    regardless of frame radius or viewport size. */
 .pin-sheet {
-  position: absolute; left: 14px; right: 14px; bottom: 14px; z-index: 2;
+  /* A centered card that HUGS the keypad, not an edge-to-edge slab: pinned
+     left/right:14px only as a narrow-screen clamp, but margin:auto + max-width
+     keep it the width of its content (keypad is 3×72 + 2×16 = 248px), so it
+     reads as a deliberate floating passcode card instead of a wide panel with
+     the pad marooned in the middle. margin handles the horizontal centering;
+     the transform below is left free for the slide-in/out. */
+  position: absolute; left: 14px; right: 14px; bottom: 16px; z-index: 2;
+  margin: 0 auto; max-width: 300px;
   display: flex; flex-direction: column; align-items: center;
-  padding: 14px 18px 26px;
-  border-radius: 32px;
+  padding: 12px 22px 24px;
+  border-radius: 34px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, 0) 30%),
     rgba(9, 15, 23, .86);
@@ -1507,9 +1566,9 @@ input  { font: inherit; }
   width: 100%; margin: 14px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, .04), rgba(255, 255, 255, 0) 35%),
-    rgba(13, 23, 36, .92);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+    rgba(13, 23, 36, .82);
+  backdrop-filter: blur(34px) saturate(1.45);
+  -webkit-backdrop-filter: blur(34px) saturate(1.45);
   border: 1px solid var(--line-hi); border-radius: var(--r-lg);
   box-shadow: var(--edge), var(--shadow-2);
   padding: 20px; animation: rise .38s var(--spring);
@@ -2413,7 +2472,9 @@ input  { font: inherit; }
 :root[data-tiles="sharp"] .tile-glow { border-radius: 14px; }
 :root[data-tile-labels="off"] .tile-lbl { display: none; }
 :root[data-tile-labels="off"] .tile { gap: 0; }
-:root[data-tile-labels="off"] .tile-grid { gap: 24px 10px; }
+/* labels off → shorter tiles, so tighten the fixed row height to match and
+   keep slot geometry (slotFromPoint reads grid-auto-rows) in step. */
+:root[data-tile-labels="off"] .tile-grid { grid-auto-rows: 62px; row-gap: 22px; column-gap: 10px; }
 
 /* accent-highlighted segmented option (used by the Motion picker) */
 .seg.fxlvl { flex: 0 0 auto; }
@@ -2454,6 +2515,37 @@ input  { font: inherit; }
 .th-chip.on .th-dot { box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 45%, transparent), 0 0 16px color-mix(in srgb, var(--c) 65%, transparent), inset 0 1px 1px rgba(255, 255, 255, .35); }
 .th-name { font-size: 11px; color: var(--text-1); line-height: 1.2; text-align: center; }
 .th-chip.on .th-name { color: var(--text-0); }
+
+/* ── Typeface picker (Personalize › Appearance) ─────────────────────────── */
+.font-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.font-chip {
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  padding: 11px 13px; border-radius: var(--r-md);
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, .025), rgba(255, 255, 255, 0) 45%), var(--s1);
+  box-shadow: var(--edge), var(--shadow-1);
+  transition: border-color .2s, transform .25s var(--spring), box-shadow .25s;
+}
+.font-chip:active { transform: scale(.96); }
+.font-chip.on { border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: var(--edge), 0 0 18px -8px var(--accent), var(--shadow-1); }
+.font-chip .fc-ag {
+  flex: 0 0 auto; width: 40px; height: 40px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; line-height: 1; color: var(--text-0);
+  background: color-mix(in srgb, var(--accent) 12%, var(--s2, rgba(255, 255, 255, .04)));
+  border: 1px solid var(--line);
+}
+.font-chip .fc-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.font-chip .fc-name { font-size: 13px; color: var(--text-0); }
+.font-chip .fc-sub { font-size: 10.5px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Text size — a zoom on the reading/interaction surfaces (menus, apps, lock,
+   controls). Home is intentionally excluded: its tiles have their own size
+   language and drag geometry, which a container zoom would throw off. */
+#v-drawer, #v-screen, #appframe, #recents, #insight, #control, #lock {
+  zoom: var(--ui-scale, 1);
+}
 
 /* ── App Store (in-shell F-Droid catalogue) ─────────────────────────────── */
 .store-search { display: flex; align-items: center; gap: 8px; padding: 0 12px; height: 42px;
@@ -2753,6 +2845,11 @@ input  { font: inherit; }
 .pg-view.show { display: block; }
 
 /* ── Home pages (swipeable pager) ───────────────────────────────────────── */
+/* The pager fills the home view (minus the search pill + dots), so every
+   page's grid reaches from the top of the screen to the bottom — icons and
+   widgets can be placed on any row, first to last. */
+.home-pager { min-height: calc(100% - 112px); }
+.home-page { display: flex; flex-direction: column; }
 .home-pager { display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
   scroll-behavior: smooth; scrollbar-width: none; align-items: flex-start; }
 .home-pager::-webkit-scrollbar { display: none; }
@@ -2911,7 +3008,7 @@ input  { font: inherit; }
 .af-placeholder .af-badge .af-badge-img { width: 100%; height: 100%; border-radius: 16px; object-fit: cover; display: block; }
 
 /* Home search pill (opens the universal search) */
-.home-search { display: flex; align-items: center; gap: 9px; width: 100%; padding: 11px 14px;
+.home-search { display: flex; align-items: center; gap: 9px; width: 100%; padding: 11px 14px; margin-top: 12px;
   margin: 2px 0 12px; border-radius: 14px; background: var(--glass); border: 1px solid var(--line);
   color: var(--text-2); font-size: 13px; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
 .home-search svg { flex: 0 0 auto; }

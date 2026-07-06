@@ -109,10 +109,9 @@ light image), a **home clock widget** (six styles,
 continuous size — drag its corner handle while editing home, or pick a preset
 here (sized with `zoom`, not `transform`, so it actually reserves the layout
 space it needs — the date, status pill and everything below reflow around it
-automatically as it grows, instead of being covered) — and free placement:
-drag the clock itself, or pick left/center/right),
-**home widgets** (an **Up next** card showing the next real calendar event —
-hidden when nothing is scheduled, never faked), an **icon pack** (squircle /
+automatically as it grows, instead of being covered) — plus left/center/right
+alignment, **home widgets** (an **Up next** card showing the next real calendar
+event — hidden when nothing is scheduled, never faked), an **icon pack** (squircle /
 round / sharp shapes, labels on or off), a **home focus** chooser (which app is
 the hero card), and **home pages** — assign each app to one of several
 swipeable pages (Android/iOS style) or take it off home.
@@ -130,6 +129,19 @@ the very first or very last page, holding on the edge **spins up a new page**
 to receive it, pruned automatically if you back off without dropping anything.
 These are stored as device-local prefs (`localStorage`); when the AI Engine
 proposes a layout in Phase II, the user's own choice wins.
+
+**One positioning system, no overlap — ever.** Each home page is a fixed-slot
+grid (3 columns × rows spanning the full page height, top to bottom). Icons
+occupy one cell each; **widgets — the clock hero, the focus card, Up next —
+live in the same grid** as full-width blocks anchored to an explicit row, so
+in edit mode a widget drags vertically and **snaps to a row** exactly like an
+icon snaps to a cell, anywhere from the first row to the last. Overlap is
+structurally impossible: widget-covered cells are *blocked* for icons, a
+repair pass relocates any icon that would collide (say, after the clock grows
+a row — its span follows its size), a tile dropped onto a widget snaps to the
+nearest free cell, and two widgets contesting a row are pushed apart with the
+one you just moved winning the spot. The search pill sits at the foot of home,
+so the grid genuinely starts at the top of the screen.
 
 **Live services** (Personalize, off by default — the toggle is the plain-language
 consent, and all egress goes through the agent, never straight from the shell):
@@ -316,6 +328,16 @@ is the only producer (Wi-Fi connected, a blocked host, low battery, a finished
 timer), and the same `push()` is what the agent event channel (roadmap 4.8.1) will
 call when it lands. *Honest limit:* notifications are shell-generated for now, not
 yet fed by system-wide events.
+
+**Widgets are doors to their own settings** (the iOS pattern): tapping the home
+clock opens Personalize › Clock & widgets, the weather reading opens
+Personalize › Weather, the date opens the Calendar, and long-pressing a
+quick-settings tile jumps to its full settings page (DND → Notifications,
+Night Light → Ambience, VPN → Network, …). In home edit mode these taps stay
+drag/resize gestures. Settings also has a **Notifications** page (Do Not
+Disturb, show-content-on-lock, clear history) and the app drawer is an **app
+library**: category chips (All · Essentials · Media · Tools · System ·
+Installed) over alphabetized shelves.
 
 **Spotlight search.** The app drawer's search is a launcher for the whole OS: one
 field spans native apps, installed Ubuntu apps, **Settings pages**, and **quick
