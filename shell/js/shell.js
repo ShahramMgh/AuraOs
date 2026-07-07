@@ -493,6 +493,10 @@
       || ((stage && stage.clientHeight ? stage.clientHeight : 640) - 96);
     return Math.max(4, Math.floor(h / ROW_H())) * 3;
   }
+  // Icons the overflow pass displaced onto a later page — the ONLY ones the
+  // backfill pass may pull back when space frees up. In-session only: after a
+  // reload (or a manual drag, which clears it) the layout is settled history.
+  const _overflowed = new Set();
   function widgetPos() {
     let w = PREF.get('homeWidgets', null);
     if (!w || typeof w !== 'object') {
@@ -796,12 +800,50 @@
           if (pi + 1 >= raw.length) raw.push([]);
           const np = raw[pi + 1], nblocked = blockedSlotSet(widgets, pi + 1);
           spill.forEach(id => {
+            _overflowed.add(id);   // remember WHO was displaced — backfill only returns these
             let s = 0;
             while (s < cap && (nblocked.has(s) || np[s] != null)) s++;
             if (s < cap) np[s] = id;
             else np.push(id);   // past that page's cap too — its own pass cascades it on
           });
         }
+      }
+    }
+    // BACKFILL PASS — the overflow's mirror: when room frees up on an earlier
+    // page (the clock shrank, an icon was removed), icons the overflow pass
+    // itself displaced flow BACK into the trailing space, in order. Only those
+    // — an icon the user placed on a later page is theirs and never moves; a
+    // manual drag clears the displaced set (the user took ownership).
+    for (let pi = 0; pi + 1 < raw.length && _overflowed.size; pi++) {
+      const p = raw[pi], blocked = blockedSlotSet(widgets, pi), np = raw[pi + 1];
+      let last = -1;
+      p.forEach((id, s) => { if (id != null) last = s; });
+      for (let s = last + 1; s < cap; s++) {
+        if (blocked.has(s)) continue;
+        // the next page's first icon, in slot order — but only if it was displaced
+        let j = 0;
+        while (j < np.length && np[j] == null) j++;
+        if (j >= np.length || !_overflowed.has(np[j])) break;
+        _overflowed.delete(np[j]);
+        p[s] = np[j]; np[j] = null; changed = true;
+      }
+    }
+    // PRUNE PASS — a page with no icons and no widgets vanishes (never while
+    // editing: "Add page" creates exactly such a page on purpose, and it must
+    // survive until something lands on it — or edit mode ends).
+    if (!S.homeEdit) {
+      for (let pi = raw.length - 1; pi >= 0 && raw.length > 1; pi--) {
+        if (raw[pi].some(id => id != null) || widgets.some(w => w.page === pi)) continue;
+        raw.splice(pi, 1);
+        widgets.forEach(w => { if (w.page > pi) w.page--; });
+        changed = true;
+        // keep stored widget anchors in the same page frame the user sees
+        const pos = widgetPos();
+        let wch = false;
+        Object.values(pos).forEach(p0 => {
+          if (p0 && (p0.page || 0) > pi) { p0.page--; wch = true; }
+        });
+        if (wch && PREF.get('homeWidgets', null)) PREF.set('homeWidgets', pos);
       }
     }
     // STICKY LAYOUT (optional — Style sheet / Personalize): rows glue
@@ -1491,6 +1533,7 @@
       PREF.set('homeWidgets', pos);
     }
     _dragNewPages = []; _dragNewPagePos = null;
+    _overflowed.clear();   // a manual drop = the user owns the layout; nothing flows back
     const grids = $$('#homePager .tile-grid');
     grids.forEach((g, i) => { g.dataset.page = i; });
     // Persist each page as a slot array: index == slot, null == empty cell.
