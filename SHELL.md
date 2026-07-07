@@ -326,11 +326,16 @@ Maps, Photos, Messages, Contacts, Phone, Android apps…) float generically:
 the window hosts the app's **real view** — the same render the full-screen
 frame uses. One-instance rule: an app's view exists exactly once, so floating
 tears the full-screen frame down (its close handler runs) and opening the app
-full-screen closes its floating window. Five apps additionally have curated
+full-screen closes its floating window. Six apps additionally have curated
 compact minis, each real data or an honest absence:
 - **Terminal** — **the same running session** as the full-screen Terminal
   app, not a copy: type a command in one, see it in the other, because it's
-  one real shell, two windows onto it (plus A−/A+ text sizing).
+  one real shell, two windows onto it (plus A−/A+ text sizing). The **+**
+  button in any terminal window spawns **another, independent shell session**
+  in its own window (own scrollback, cwd and history, running concurrently;
+  up to four) — closing an extra terminal ends that session for real.
+- **Calculator** — the same pad and state as the full app; both can be open
+  at once, two faces of one calculation, and the keyboard reaches either.
 - **Files** — a compact browser over the real filesystem, with its own
   working folder; tapping a file hands over to the full Files app there.
 - **Monitor** — live CPU, memory and uptime from `/api/system`.

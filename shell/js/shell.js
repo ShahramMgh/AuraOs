@@ -2684,7 +2684,7 @@
   const stillOn = id => S.view === id;
   const clearScreenTimer = () => { if (S.screenTimer) { clearInterval(S.screenTimer); S.screenTimer = null; } };
   // Which screens have a floating mini version (a live brick) to pop out into.
-  const WM_FLOAT = { terminal: 'terminal', notes: 'notes', files: 'files', 'sys-monitor': 'sysmon' };
+  const WM_FLOAT = { terminal: 'terminal', notes: 'notes', files: 'files', 'sys-monitor': 'sysmon', calc: 'calc' };
   // Desktop-style window controls, on the window itself (not buried in
   // settings): every screen is a maximized window, so it gets minimize (–,
   // drop to home) and — when a floating mini version exists — restore-down
@@ -3667,7 +3667,7 @@
      showing, or the device is locked, and reappear on return. */
   const LW_GAP = 8;                           // breathing room around a snapped window
   const LW_PILL_W = 172, LW_PILL_H = 38;      // a minimized window's title pill
-  const LW_ORDER = ['terminal', 'files', 'sysmon', 'notes', 'music'];
+  const LW_ORDER = ['terminal', 'files', 'sysmon', 'notes', 'music', 'calc'];
   const LW_DEFS = {
     terminal: { name: 'Terminal',   icon: 'terminal', def: { xf: .56, yf: .05, wf: .40, hf: .32 },
       extras: () => termWinExtras(),
@@ -3680,6 +3680,8 @@
       mount: box => lwMountNotes(box) },
     music:    { name: 'Music',      icon: 'music',    def: { xf: .30, yf: .60, wf: .40, hf: .22 },
       mount: box => lwMountMusic(box) },
+    calc:     { name: 'Calculator', icon: 'calc',     def: { xf: .48, yf: .30, wf: .48, hf: .52 },
+      mount: box => lwMountCalc(box) },
   };
   /* Dynamic app windows — ANY app can float, not just the curated minis:
      window id `app:<appId>` hosts the app's REAL view, the same render/wire
@@ -5574,11 +5576,14 @@
     drawCalc();
   }
   const calcSym = op => ({ '+': '+', '-': '−', '*': '×', '/': '÷' }[op] || op);
+  const ensureCalcState = () => { if (!S.calc) S.calc = { display: '0', prev: null, op: null, fresh: true, expr: '' }; };
   function renderCalc() {
-    if (!S.calc) S.calc = { display: '0', prev: null, op: null, fresh: true, expr: '' };
+    ensureCalcState();
     drawCalc();
   }
-  function drawCalc() {
+  // The calculator's body — pure classes, no ids, so the full screen and the
+  // floating window can host it AT THE SAME TIME, both faces of one S.calc.
+  function calcBodyHTML() {
     const c = S.calc;
     const keys = [
       ['clear', 'C', 'fn'], ['neg', '±', 'fn'], ['pct', '%', 'fn'], ['/', '÷', 'op'],
@@ -5587,8 +5592,7 @@
       ['1', '1', ''], ['2', '2', ''], ['3', '3', ''], ['+', '+', 'op'],
       ['0', '0', 'zero'], ['.', '.', ''], ['=', '=', 'eq'],
     ];
-    $('#screenScroll').innerHTML = `
-      ${shead('Calculator', 'Calculator')}
+    return `
       <div class="calc-wrap">
         <div class="calc-screen">
           <div class="calc-expr mono">${esc(c.expr || '')}&nbsp;</div>
@@ -5597,9 +5601,24 @@
         <div class="calc-pad">
           ${keys.map(([k, label, cls]) => `<button class="ckey ${cls} ${c.op === k && c.fresh ? 'active' : ''}" data-ck="${esc(k)}">${label}</button>`).join('')}
         </div>
-      </div>
-      <div style="height:8px"></div>`;
-    $('#screenScroll').querySelectorAll('[data-ck]').forEach(b => b.onclick = () => calcPress(b.dataset.ck));
+      </div>`;
+  }
+  const wireCalcPad = host =>
+    host.querySelectorAll('[data-ck]').forEach(b => b.onclick = () => calcPress(b.dataset.ck));
+  // Repaint every live face of the calculator: the screen if it's showing,
+  // and the floating window if it's mounted.
+  function drawCalc() {
+    if (S.view === 'calc') {
+      $('#screenScroll').innerHTML = `${shead('Calculator', 'Calculator')}${calcBodyHTML()}<div style="height:8px"></div>`;
+      wireCalcPad($('#screenScroll'));
+    }
+    const w = document.querySelector('#liveWins .lt-win[data-lw="calc"] [data-lwbody]');
+    if (w) { w.innerHTML = `<div class="lw-calc">${calcBodyHTML()}</div>`; wireCalcPad(w); }
+  }
+  function lwMountCalc(box) {
+    ensureCalcState();
+    box.innerHTML = `<div class="lw-calc">${calcBodyHTML()}</div>`;
+    wireCalcPad(box);
   }
 
   /* ======================================================================
@@ -6454,8 +6473,10 @@
 
     // Escape / swipe up on control to dismiss
     document.addEventListener('keydown', e => {
-      // Calculator keyboard input, when it's the active screen.
-      if (S.view === 'calc' && !S.locked && !S.controlOpen && !S.appOpen) {
+      // Calculator keyboard input — the active screen, or its floating window
+      // (text inputs everywhere stopPropagation, so this never steals typing).
+      const calcWinUp = !!document.querySelector('#liveWins .lt-win[data-lw="calc"]');
+      if ((S.view === 'calc' || calcWinUp) && !S.locked && !S.controlOpen && !S.appOpen) {
         const K = { '*': '*', 'x': '*', '/': '/', '+': '+', '-': '-', '=': '=', 'Enter': '=',
           'Backspace': 'back', 'Delete': 'clear', 'c': 'clear', 'C': 'clear', '%': 'pct', '.': '.', ',': '.' };
         if (/^[0-9]$/.test(e.key)) { e.preventDefault(); return calcPress(e.key); }

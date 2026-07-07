@@ -1480,6 +1480,15 @@ input  { font: inherit; }
    full-screen frame's .af-view provides, just smaller */
 .lw-appview { flex: 1; min-height: 0; position: relative; overflow: hidden;
   display: flex; flex-direction: column; }
+/* the windowed calculator: the same pad, compacted to fit a small window */
+.lw-calc { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 10px 10px; }
+.lw-calc .calc-wrap { margin-top: 2px; }
+.lw-calc .calc-pad { gap: 6px; }
+.lw-calc .ckey { height: 38px; font-size: 16px; border-radius: 10px; }
+.lw-calc .ckey.fn { font-size: 14px; }
+.lw-calc .ckey.op { font-size: 18px; }
+.lw-calc .calc-display { font-size: 26px; }
+.lw-calc .calc-expr { font-size: 11px; }
 .lw-fm { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .lw-fm-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
   padding: 5px 8px; border-bottom: 1px solid var(--line); }
