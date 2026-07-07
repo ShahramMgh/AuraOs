@@ -707,12 +707,24 @@
     }
     return pages;
   }
-  // A home tile id is either a built-in app id, or "android:<package>" for an
-  // Android app installed from the App Store — resolve either to a tile object.
+  // A home tile id is a built-in app id, "android:<package>" for an Android
+  // app, or "desktop:<desktop-id>" for a native Linux app discovered from the
+  // agent's registry — resolve any of them to a tile object. Desktop apps are
+  // remembered in PREF 'desktopApps' the moment one is added to home, so home
+  // can draw the tile without waiting for the drawer's async catalog.
   function resolveHomeApp(id) {
     if (id && id.indexOf('android:') === 0) {
       const pkg = id.slice(8), names = PREF.get('androidApps', {});
       return { id, pkg, android: true, name: names[pkg] || pkg, glyph: 'android', color: '#2BA869' };
+    }
+    if (id && id.indexOf('desktop:') === 0) {
+      const did = id.slice(8);
+      const reg = PREF.get('desktopApps', {})[did]
+        || (INSTALLED || []).filter(a => a.id === did)
+          .map(a => ({ name: a.name, icon: !!a.icon, glyph: catIcon(a.categories) }))[0];
+      if (!reg) return null;
+      return { id, did, desktop: true, name: reg.name || did, glyph: reg.glyph || 'grid',
+        color: '#5C7A99', iconUrl: reg.icon && Sov.appIconUrl ? Sov.appIconUrl(did) : null };
     }
     return Sov.app(id);
   }
@@ -1023,7 +1035,8 @@
     const using = Sov.activeSensorsFor(app.id).length ? 'using' : '';
     const del = `<span class="tile-x" data-hdel="${app.id}" aria-label="Remove">${ic('x', 11)}</span>`;
     // Android apps show their own real icon when we can resolve it; else a glyph.
-    const iconUrl = app.android && Sov.appIconUrl ? Sov.appIconUrl('waydroid.' + app.pkg) : null;
+    const iconUrl = app.iconUrl
+      || (app.android && Sov.appIconUrl ? Sov.appIconUrl('waydroid.' + app.pkg) : null);
     const img = iconUrl ? `<img class="tile-img" src="${iconUrl}" onerror="this.remove()" alt="">` : '';
     // --i drives the staggered entrance; --col tints the icon its own colour.
     // Each tile owns an explicit grid cell (data-slot -> grid-column/row) so
@@ -1323,12 +1336,14 @@
     ].join('');
     const about = app.android
       ? 'An Android app in the native Android layer — sandboxed, memory-capped, running on demand.'
-      : (APP_ABOUT[app.id] || 'A built-in app.');
+      : app.desktop
+        ? 'A native Linux application installed on this device — it opens in its own window, outside the shell.'
+        : (APP_ABOUT[app.id] || 'A built-in app.');
     scrim.innerHTML = `<div class="prompt-card app-info">
       <div class="aic-head">
         <span class="aic-ic" style="--col:${app.color}">${ic(app.glyph, 30)}</span>
         <span class="aic-t"><span class="aic-name">${esc(app.name)}</span>
-        <span class="aic-sub">${esc(app.android ? 'Android · ' + app.pkg : (app.cat || 'App') + ' · built-in')}${running ? ' · running' : ''}</span></span>
+        <span class="aic-sub">${esc(app.android ? 'Android · ' + app.pkg : app.desktop ? 'Native Linux app' : (app.cat || 'App') + ' · built-in')}${running ? ' · running' : ''}</span></span>
       </div>
       <div class="aic-about">${esc(about)}</div>
       ${live.length ? `<div class="aic-live">${ic('eye',13)}<span>Using ${live.map(s => ({ mic: 'microphone', cam: 'camera', loc: 'location' }[s])).join(', ')} right now</span></div>` : ''}
@@ -1375,11 +1390,14 @@
       setTimeout(() => { if (!scrim.classList.contains('open')) scrim.innerHTML = ''; }, 200);
     };
     const onHome = onHomeAlready(id);
+    const sub = app.android ? 'Android · ' + app.pkg
+      : app.desktop ? 'Native Linux app'
+      : (app.cat || 'App') + ' · built-in';
     scrim.innerHTML = `<div class="prompt-card app-info">
       <div class="aic-head">
-        <span class="aic-ic" style="--col:${app.color}">${ic(app.glyph, 30)}</span>
+        <span class="aic-ic" style="--col:${app.color}">${app.iconUrl ? `<img class="aic-img" src="${esc(app.iconUrl)}" onerror="this.remove()" alt="">` : ic(app.glyph, 30)}</span>
         <span class="aic-t"><span class="aic-name">${esc(app.name)}</span>
-        <span class="aic-sub">${esc(app.android ? 'Android · ' + app.pkg : (app.cat || 'App') + ' · built-in')}</span></span>
+        <span class="aic-sub">${esc(sub)}</span></span>
       </div>
       <div class="aic-actions">
         <button class="pbtn allow" data-am-open>Open</button>
@@ -1388,7 +1406,9 @@
           : `<button class="pbtn ghost" data-am-home>${ic('home',14)} Add to home</button>`}
         ${app.android
           ? `<button class="pbtn deny" data-am-uninstall>${ic('trash',13)} Uninstall</button>`
-          : `<button class="pbtn ghost" disabled title="Part of AuraOS">${ic('logo',13)} Built-in</button>`}
+          : app.desktop
+            ? `<button class="pbtn ghost" disabled title="Manage system packages from the Terminal">${ic('cpu',13)} System app</button>`
+            : `<button class="pbtn ghost" disabled title="Part of AuraOS">${ic('logo',13)} Built-in</button>`}
       </div></div>`;
     scrim.classList.add('open');
     scrim.onclick = e => { if (e.target === scrim) close(); };
@@ -1396,6 +1416,13 @@
     const ah = scrim.querySelector('[data-am-home]');
     if (ah) ah.onclick = () => {
       close();
+      // a desktop app is remembered so home can draw its tile without the
+      // drawer's async catalog (name, icon-ness, category glyph)
+      if (app.desktop) {
+        const reg = PREF.get('desktopApps', {});
+        reg[app.did] = { name: app.name, icon: !!app.iconUrl, glyph: app.glyph };
+        PREF.set('desktopApps', reg);
+      }
       addToHome(id);
       toast(`${esc(app.name)} added to home`, 'ok', 'check');
     };
@@ -2191,7 +2218,7 @@
       .filter(a => !builtinNames.has(a.name.toLowerCase()))
       .filter(a => String(a.id).indexOf('waydroid.') !== 0)   // Android shown via the unified list
       .filter(a => !q || a.name.toLowerCase().includes(q) || (a.comment || '').toLowerCase().includes(q))
-      .map(a => appRow(`data-desktop="${esc(a.id)}"`, a.icon ? Sov.appIconUrl(a.id) : null, catIcon(a.categories), a.name, a.comment || a.id));
+      .map(a => appRow(`data-launch="desktop:${esc(a.id)}"`, a.icon ? Sov.appIconUrl(a.id) : null, catIcon(a.categories), a.name, a.comment || a.id));
     const androidRows = (_androidApps || [])
       .filter(a => a && a.package && (!q || (a.name || '').toLowerCase().includes(q)))
       .map(a => appRow(`data-launch="android:${esc(a.package)}"`, Sov.appIconUrl('waydroid.' + a.package), 'android', a.name || a.package, 'App'));
@@ -2259,13 +2286,8 @@
       box.querySelectorAll('[data-file]').forEach(b => b.onclick = () => { S.fmPath = b.dataset.file; go('files'); });
     });
     $('#drawerScroll').querySelectorAll('[data-spot]').forEach(b => b.onclick = () => spots[+b.dataset.spot].run());
-    // launch real installed apps through the agent (best-effort GUI launch)
-    $('#drawerScroll').querySelectorAll('[data-desktop]').forEach(b => b.onclick = async () => {
-      const name = b.querySelector('.rtitle').textContent;
-      toast('Launching ' + name + '…', '', 'grid');
-      const r = await Sov.launchDesktop(b.dataset.desktop);
-      if (!r || !r.ok) toast("Couldn't launch " + name, 'alert', 'x');
-    });
+    // (native Linux apps launch through launch('desktop:…') via data-launch —
+    // same path as every other app, so they also get the long-press menu)
   }
 
   /* ======================================================================
@@ -5661,6 +5683,13 @@
       const r = await Sov.androidLaunch(a.pkg);
       if (r && r.ok) { openAppFrame(a); toast('Opening Android app…', '', 'android'); }
       else toast((r && r.error) || 'Could not open', 'alert', 'x');
+      return;
+    }
+    if (id && id.indexOf('desktop:') === 0) {   // a native Linux app (agent registry)
+      const a = resolveHomeApp(id);
+      toast('Launching ' + ((a && a.name) || 'app') + '…', '', (a && a.glyph) || 'grid');
+      const r = await Sov.launchDesktop(id.slice(8));
+      if (!r || !r.ok) toast("Couldn't launch " + ((a && a.name) || 'app'), 'alert', 'x');
       return;
     }
     const app = Sov.app(id);

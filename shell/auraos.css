@@ -3472,6 +3472,7 @@ input  { font: inherit; }
 }
 :root[data-tiles="round"] .aic-ic { border-radius: 50%; }
 :root[data-tiles="sharp"] .aic-ic { border-radius: 10px; }
+.aic-img { width: 36px; height: 36px; border-radius: 9px; object-fit: contain; }
 .aic-t { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .aic-name { font-size: 17px; font-weight: 600; color: var(--text-0); letter-spacing: -.01em; }
 .aic-sub { font-size: 10.5px; color: var(--text-2); font-family: var(--mono); letter-spacing: .02em;
