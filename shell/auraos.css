@@ -3032,10 +3032,16 @@ input  { font: inherit; }
    (search pill included) can be placed on any row, first to last. */
 .home-pager { min-height: calc(100% - 48px); }
 .home-page { display: flex; flex-direction: column; }
+/* Pages STRETCH to the pager's full height (the default — never flex-start):
+   the grid inside fills each page top to bottom, so a drag can drop on any
+   row of the screen, not just the rows that already hold content. */
 .home-pager { display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
-  scroll-behavior: smooth; scrollbar-width: none; align-items: flex-start; }
+  scroll-behavior: smooth; scrollbar-width: none; }
 .home-pager::-webkit-scrollbar { display: none; }
-.home-page { flex: 0 0 100%; scroll-snap-align: start; }
+/* The small horizontal padding keeps a page's content — and the edit mode's
+   dashed outline, which paints 5.5px OUTSIDE the widget box (outline-offset)
+   — from showing on the neighbouring page of the pager. */
+.home-page { flex: 0 0 100%; scroll-snap-align: start; padding: 0 6px; }
 .page-dots { display: flex; justify-content: center; gap: 7px; padding: 12px 0 2px; }
 .pdot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); opacity: .55;
   transition: width .2s, background .2s, opacity .2s; }
