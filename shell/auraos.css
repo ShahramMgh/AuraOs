@@ -537,6 +537,9 @@ input  { font: inherit; }
 .home-widget {
   position: relative; min-width: 0;
   display: flex; flex-direction: column; justify-content: center;
+  /* nothing a widget holds may paint past the grid's width — an over-scaled
+     clock clips at the edge instead of sticking out over the bezel */
+  overflow-x: clip;
 }
 .home-widget .aura-hero { width: 100%; }
 /* edit mode: the widget is a draggable block — its inner controls stand down

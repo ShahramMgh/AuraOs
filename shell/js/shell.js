@@ -517,10 +517,12 @@
     const add = (id, on) => {
       if (!on) return;
       const p = pos[id] || {};
-      let row = (p.row == null ? null : Math.max(0, p.row | 0));
-      // the search pill defaults to the bottom row, not the top auto-stack
-      if (id === 'search' && row == null) row = defaultSearchRow();
-      act.push({ id, span: widgetSpan(id),
+      let row = (p.row == null ? null : Math.max(0, p.row | 0)), pin = false;
+      // the search pill defaults to the bottom row, not the top auto-stack —
+      // and that bottom placement is PINNED: the sticky pass must never pull
+      // it up to hug the icons (a launcher's search belongs near the thumb)
+      if (id === 'search' && row == null) { row = defaultSearchRow(); pin = true; }
+      act.push({ id, span: widgetSpan(id), pin,
         page: Math.max(0, Math.min((pageCount || 1) - 1, p.page || 0)),
         row, seq: p.seq || 0 });
     };
@@ -875,7 +877,9 @@
         const map = []; let shift = 0;
         for (let r = 0; r <= maxRow; r++) map[r] = used(r) ? r - shift : (shift++, null);
         if (!shift) return;
-        pw.forEach(w => { if (map[w.row] != null) w.row = map[w.row]; });
+        // pinned widgets (the bottom-defaulted search) hold their row — the
+        // gap between the icons and the bottom bar is deliberate, not slack
+        pw.forEach(w => { if (!w.pin && map[w.row] != null) w.row = map[w.row]; });
         const np = [];
         p.forEach((id, s) => {
           if (id == null) return;
@@ -1071,6 +1075,7 @@
   function enterHomeEditInPlace() {
     if (S.homeEdit) return;
     S.homeEdit = true;
+    syncLiveBricks();   // floating windows step aside while arranging home
     const body = $('#v-home .home2-body');
     if (body) body.classList.add('editing');
     // These gate on S.homeEdit at call time and were wired once already
@@ -3787,7 +3792,10 @@
     return { left: r.xf * b.width, top: r.yf * b.height, width: r.wf * b.width, height: r.hf * b.height };
   }
   function lwShouldShow() {
-    return !S.locked && S.view === 'home' && !S.appOpen && !S.recentsOpen
+    // Not while editing home: floating windows sit over the grid and would
+    // shadow every drag's elementFromPoint hit-test — the "space seems
+    // blocked" trap. Arranging icons means the windows step aside.
+    return !S.locked && S.view === 'home' && !S.appOpen && !S.recentsOpen && !S.homeEdit
       && Object.values(lwAll()).some(w => w.on);
   }
   let _lwDragging = false, _lwResizeBound = false;
