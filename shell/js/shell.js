@@ -3504,91 +3504,100 @@
     `<span class="tp-c">:</span><span class="tp-path">${esc(cwdShort(cwd))}</span>` +
     `<span class="tp-c">$</span>&nbsp;</span>`;
 
-  // One real terminal SESSION lives in S (termLines/termCwd/termHist) — shared
-  // by the full-screen Terminal app and the live home brick below, so typing
-  // in either shows up in both: it's the same running shell, two windows onto it.
-  function ensureTermSession() {
-    if (S.termLines === undefined) {
+  /* Terminal SESSIONS — each a real, independent shell context (scrollback,
+     cwd, history, busy flag), keyed by id in S.termSessions. 'main' is shared
+     by the full-screen Terminal app AND the 'terminal' window, so typing in
+     either shows up in both: one shell, two windows onto it. Every extra
+     window ('term:2', 'term:3', …) owns its own session — commands from
+     different sessions run concurrently (the agent's exec is per-call). */
+  function termSession(sid) {
+    const all = S.termSessions || (S.termSessions = {});
+    if (!all[sid]) {
       const live = Sov.get().mode === 'live';
-      S.termLines = [
-        { t: 'sys', v: 'AuraOS  ·  ' + (live ? 'GNU/Linux shell' : 'preview shell') },
-        { t: 'sys', v: 'Type "help" for commands, "clear" to reset.' },
-        { t: 'sys', v: '' },
-      ];
+      all[sid] = {
+        lines: [
+          { t: 'sys', v: 'AuraOS  ·  ' + (live ? 'GNU/Linux shell' : 'preview shell') },
+          { t: 'sys', v: 'Type "help" for commands, "clear" to reset.' },
+          { t: 'sys', v: '' },
+        ],
+        cwd: live ? '' : '/home/aura', hist: [], histIdx: 0, busy: false, draft: null,
+      };
     }
-    if (!S.termCwd) S.termCwd = Sov.get().mode === 'live' ? '' : '/home/aura';
+    return all[sid];
   }
-  function termLinesHTML() {
-    return S.termLines.map(l => {
+  const winSid = winId => winId === 'terminal' ? 'main' : winId;   // window ↔ session
+  function termLinesHTML(T) {
+    return T.lines.map(l => {
       if (l.t === 'cmd') return `<div class="tl">${promptHTML(l.cwd)}<span class="tl-cmd">${esc(l.v)}</span></div>`;
       if (l.t === 'sys') return `<div class="tl tl-sys">${esc(l.v)}</div>`;
       return `<div class="tl tl-out">${esc(l.v)}</div>`;
     }).join('');
   }
-  function termLiveRowHTML(inputClass) {
-    return S.termBusy
-      ? `<div class="tl tl-busy"><span>${esc(cwdShort(S.termCwd))} · running…</span>
+  function termLiveRowHTML(T, inputClass) {
+    return T.busy
+      ? `<div class="tl tl-busy"><span>${esc(cwdShort(T.cwd))} · running…</span>
            <button class="term-stop" data-termstop title="Stop (Ctrl+C)">${ic('stop', 10)}<span>stop</span></button></div>`
-      : `<div class="tl tl-live">${promptHTML(S.termCwd)}<input class="term-in ${inputClass}"
+      : `<div class="tl tl-live">${promptHTML(T.cwd)}<input class="term-in ${inputClass}"
            autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div>`;
   }
   // The busy row's stop button — a real Ctrl-C: the agent SIGINTs the whole
   // process group; the pending exec then returns with partial output + ^C.
+  // (The agent tracks the most recent command — with several sessions running
+  // at once, stop hits the latest one started.)
   function wireTermStop(box, autofocus) {
     const b = box.querySelector('[data-termstop]'); if (!b) return;
     b.onclick = () => { b.disabled = true; Sov.execCancel(); };
     b.onkeydown = e => { if (e.key === 'c' && e.ctrlKey) { e.preventDefault(); b.click(); } };
     if (autofocus) b.focus();
   }
-  // Runs one command against the real shared session; redraw() repaints
-  // whichever window(s) should reflect it (the caller decides which).
-  async function termRunCommand(cmd, redraw) {
-    const h = S.termHist || (S.termHist = []);
-    S.termLines.push({ t: 'cmd', v: cmd, cwd: S.termCwd });
-    if (cmd.trim()) { h.push(cmd); S.termHistIdx = h.length; }
-    if (cmd.trim() === 'clear') { S.termLines = []; redraw(); return; }
+  // Runs one command against a session; redraw() repaints whichever window(s)
+  // should reflect it (the caller decides which).
+  async function termRunCommand(T, cmd, redraw) {
+    T.lines.push({ t: 'cmd', v: cmd, cwd: T.cwd });
+    if (cmd.trim()) { T.hist.push(cmd); T.histIdx = T.hist.length; }
+    if (cmd.trim() === 'clear') { T.lines = []; redraw(); return; }
     if (!cmd.trim()) { redraw(); return; }   // bare Enter → fresh prompt
-    S.termBusy = true; redraw();
-    const r = await Sov.exec(cmd, S.termCwd);
-    S.termBusy = false;
-    if (r.out === '\x00clear') S.termLines = [];
-    else if (r.out !== undefined && r.out !== '') S.termLines.push({ t: 'out', v: r.out });
-    if (r.cwd) S.termCwd = r.cwd;
-    if (S.termLines.length > 300) S.termLines = S.termLines.slice(-300);
+    T.busy = true; redraw();
+    const r = await Sov.exec(cmd, T.cwd);
+    T.busy = false;
+    if (r.out === '\x00clear') T.lines = [];
+    else if (r.out !== undefined && r.out !== '') T.lines.push({ t: 'out', v: r.out });
+    if (r.cwd) T.cwd = r.cwd;
+    if (T.lines.length > 300) T.lines = T.lines.slice(-300);
     redraw();
   }
   // Wires history (↑/↓), Tab completion, Ctrl-L/Ctrl-C and Enter on a terminal
-  // input scoped to `box` (the full-screen box and the home brick — no shared
-  // ids). A redraw replaces the input, so anything mid-typing survives via
-  // S.termDraft — the freshly created input picks it up here.
-  function wireTermInput(box, inp, onRedraw) {
-    if (S.termDraft != null) { inp.value = S.termDraft; S.termDraft = null; inp.focus(); moveCaretEnd(inp); }
+  // input scoped to `box` (each window has its own — no shared ids). A redraw
+  // replaces the input, so anything mid-typing survives via the session's
+  // draft — the freshly created input picks it up here.
+  function wireTermInput(T, box, inp, onRedraw) {
+    if (T.draft != null) { inp.value = T.draft; T.draft = null; inp.focus(); moveCaretEnd(inp); }
     box.onclick = () => inp.focus();
     box.onscroll = () => { if (box.scrollLeft !== 0) box.scrollLeft = 0; };   // keep the prompt flush-left
     inp.onkeydown = async e => {
       e.stopPropagation();
-      const h = S.termHist || (S.termHist = []);
-      if (e.key === 'ArrowUp') { if (h.length) { S.termHistIdx = Math.max(0, (S.termHistIdx ?? h.length) - 1); inp.value = h[S.termHistIdx] || ''; moveCaretEnd(inp); } return; }
-      if (e.key === 'ArrowDown') { S.termHistIdx = Math.min(h.length, (S.termHistIdx ?? h.length) + 1); inp.value = h[S.termHistIdx] || ''; return; }
-      if (e.key === 'Tab') { e.preventDefault(); await termComplete(inp, onRedraw); return; }
-      if (e.key === 'l' && e.ctrlKey) { e.preventDefault(); S.termLines = []; onRedraw(); return; }
+      const h = T.hist;
+      if (e.key === 'ArrowUp') { if (h.length) { T.histIdx = Math.max(0, (T.histIdx ?? h.length) - 1); inp.value = h[T.histIdx] || ''; moveCaretEnd(inp); } return; }
+      if (e.key === 'ArrowDown') { T.histIdx = Math.min(h.length, (T.histIdx ?? h.length) + 1); inp.value = h[T.histIdx] || ''; return; }
+      if (e.key === 'Tab') { e.preventDefault(); await termComplete(T, inp, onRedraw); return; }
+      if (e.key === 'l' && e.ctrlKey) { e.preventDefault(); T.lines = []; onRedraw(); return; }
       if (e.key === 'c' && e.ctrlKey && inp.selectionStart === inp.selectionEnd) {
         // bash reflex: Ctrl-C with nothing selected abandons the line (^C in
         // the scrollback, fresh prompt); with a selection it stays copy.
         e.preventDefault();
-        S.termLines.push({ t: 'cmd', v: inp.value + '^C', cwd: S.termCwd });
+        T.lines.push({ t: 'cmd', v: inp.value + '^C', cwd: T.cwd });
         onRedraw(); return;
       }
       if (e.key !== 'Enter') return;
-      await termRunCommand(inp.value, onRedraw);
+      await termRunCommand(T, inp.value, onRedraw);
     };
   }
   // Tab completion, bash-flavoured: first word → command names, later words →
   // files and directories (dirs keep a trailing /). One match completes it, a
   // common prefix extends to it, anything else prints the candidates — the
   // double-Tab reflex, minus the double.
-  async function termComplete(inp, onRedraw) {
-    if (S.termBusy) return;
+  async function termComplete(T, inp, onRedraw) {
+    if (T.busy) return;
     const caret = inp.selectionStart ?? inp.value.length;
     const before = inp.value.slice(0, caret), after = inp.value.slice(caret);
     const m = before.match(/(^|[\s;|&])([^\s;|&]*)$/);
@@ -3597,7 +3606,7 @@
     const head = before.slice(0, before.length - word.length);
     const isFirst = !/\S/.test(head.split(/[;|&]/).pop());   // start of a (sub)command?
     let list;
-    try { list = await Sov.complete(word, isFirst, S.termCwd); } catch (e) { return; }
+    try { list = await Sov.complete(word, isFirst, T.cwd); } catch (e) { return; }
     if (!Array.isArray(list) || !list.length) return;
     const set = new Set(list);
     list = list.filter(x => !set.has(x + '/'));   // a dir shows once, with its slash
@@ -3612,28 +3621,28 @@
       inp.value = head + bsl(pre) + after;
       inp.setSelectionRange((head + bsl(pre)).length, (head + bsl(pre)).length);
     } else {
-      S.termDraft = inp.value;   // survive the redraw that prints the candidates
-      S.termLines.push({ t: 'sys', v: list.slice(0, 40).join('  ') + (list.length > 40 ? '  …' : '') });
+      T.draft = inp.value;   // survive the redraw that prints the candidates
+      T.lines.push({ t: 'sys', v: list.slice(0, 40).join('  ') + (list.length > 40 ? '  …' : '') });
       onRedraw();
     }
   }
   function moveCaretEnd(inp) { setTimeout(() => { const n = inp.value.length; try { inp.setSelectionRange(n, n); } catch (e) {} }, 0); }
 
   function renderTerminal() {
-    ensureTermSession();
     drawTerminal();
   }
   function drawTerminal() {
+    const T = termSession('main');
     $('#screenScroll').innerHTML = `
       ${shead('System', 'Terminal')}
-      <div class="term" id="termBox">${termLinesHTML()}${termLiveRowHTML('')}</div>
+      <div class="term" id="termBox">${termLinesHTML(T)}${termLiveRowHTML(T, '')}</div>
       <div style="height:8px"></div>`;
     const box = $('#termBox');
     box.scrollTop = box.scrollHeight;
     wireTermStop(box, true);   // busy: focus the stop button so Ctrl+C lands
     const inp = box.querySelector('.term-in');
     if (!inp) return;
-    wireTermInput(box, inp, () => { if (S.view === 'terminal') drawTerminal(); });
+    wireTermInput(T, box, inp, () => { if (S.view === 'terminal') drawTerminal(); });
     setTimeout(() => { inp.focus(); box.scrollLeft = 0; box.scrollTop = box.scrollHeight; }, 30);
   }
 
@@ -3661,9 +3670,8 @@
   const LW_ORDER = ['terminal', 'files', 'sysmon', 'notes', 'music'];
   const LW_DEFS = {
     terminal: { name: 'Terminal',   icon: 'terminal', def: { xf: .56, yf: .05, wf: .40, hf: .32 },
-      extras: () => `<button class="lt-ctrl lt-font" data-lwfont="-1" aria-label="Smaller text">A−</button>
-                     <button class="lt-ctrl lt-font" data-lwfont="1" aria-label="Bigger text">A+</button>`,
-      mount: box => lwMountTerminal(box), onResize: () => redrawLiveTermBrick() },
+      extras: () => termWinExtras(),
+      mount: box => lwMountTerminal(box, 'terminal'), onResize: () => redrawTermWin('terminal') },
     files:    { name: 'Files',      icon: 'folder',   def: { xf: .04, yf: .34, wf: .46, hf: .36 },
       mount: box => lwMountFiles(box) },
     sysmon:   { name: 'Monitor',    icon: 'chart',    def: { xf: .52, yf: .42, wf: .44, hf: .30 },
@@ -3679,10 +3687,26 @@
      the frame shows). One-instance rule: an app view's element ids are
      document-global, so floating tears the frame down and opening the frame
      un-floats — exactly one copy of an app's DOM ever exists. */
+  // Shared header extras for every terminal window: text size and "+" (spawn
+  // another independent shell in its own window).
+  const termWinExtras = () => `<button class="lt-ctrl lt-font" data-lwfont="-1" aria-label="Smaller text">A−</button>
+    <button class="lt-ctrl lt-font" data-lwfont="1" aria-label="Bigger text">A+</button>
+    <button class="lt-ctrl" data-lwnewterm aria-label="New terminal window" title="New terminal">${ic('plus', 13)}</button>`;
   const _lwAppDefs = {};   // per-app def cache (stable identity across renders)
   function lwDef(id) {
     if (LW_DEFS[id]) return LW_DEFS[id];
-    if (!id || !id.startsWith('app:')) return null;
+    if (!id) return null;
+    if (id.startsWith('term:')) {          // an extra shell, its own session
+      if (_lwAppDefs[id]) return _lwAppDefs[id];
+      const n = +id.slice(5) || 2;
+      return (_lwAppDefs[id] = {
+        name: 'Terminal ' + n, icon: 'terminal',
+        def: { xf: .10 + ((n - 2) % 3) * .07, yf: .40 + ((n - 2) % 3) * .06, wf: .40, hf: .32 },
+        extras: termWinExtras,
+        mount: box => lwMountTerminal(box, id), onResize: () => redrawTermWin(id),
+      });
+    }
+    if (!id.startsWith('app:')) return null;
     if (_lwAppDefs[id]) return _lwAppDefs[id];
     const aid = id.slice(4);
     const app = Sov.app(aid) || resolveHomeApp(aid);
@@ -3698,8 +3722,10 @@
       },
     });
   }
-  // Every window that exists right now: the curated minis + any floated apps.
-  const lwIds = () => [...LW_ORDER, ...Object.keys(lwAll()).filter(k => k.startsWith('app:'))];
+  // Every window that exists right now: the curated minis, extra terminals,
+  // and any floated apps.
+  const lwIds = () => [...LW_ORDER,
+    ...Object.keys(lwAll()).filter(k => k.startsWith('app:') || k.startsWith('term:'))];
   /* Per-window state, PREF 'liveWins': { id: { on, rect:{xf,yf,wf,hf}|null,
      snap, min, z } }. Rects are FRACTIONS of the brick area so a window holds
      its relative spot across viewport sizes/orientations. One-time migration
@@ -3875,7 +3901,15 @@
       e.stopPropagation();
       lwSet(id, { on: false });
       lwRemoveWin(id);
-      toast(`${d.name} closed — float it again from the app's title bar`, '', d.icon);
+      if (id.startsWith('term:')) {
+        // an extra shell dies with its window — scrollback, cwd, history gone
+        if (S.termSessions) delete S.termSessions[id];
+        const all = lwAll(); delete all[id]; PREF.set('liveWins', all);
+        delete _lwAppDefs[id];
+        toast(`${d.name} closed — that shell session has ended`, '', d.icon);
+      } else {
+        toast(`${d.name} closed — float it again from the app's title bar`, '', d.icon);
+      }
     };
     win.querySelector('[data-lwbtn="min"]').onclick = e => {
       e.stopPropagation();
@@ -3886,13 +3920,16 @@
       e.stopPropagation();
       lwPlace(id, lwGet(id).snap === 'full' ? null : 'full');
     };
-    // terminal's font-size steppers (the only per-brick extra so far)
+    // terminal extras: font-size steppers + "+" (another shell, own window)
     win.querySelectorAll('[data-lwfont]').forEach(bn => bn.onclick = e => {
       e.stopPropagation();
       const px = Math.max(9, Math.min(16, ltFontPx() + +bn.dataset.lwfont));
       PREF.set('ltFontPx', px);
-      const t = win.querySelector('.lt-term'); if (t) t.style.fontSize = px + 'px';
+      // every terminal window follows the shared text-size preference
+      $$('#liveWins .lt-term').forEach(t => { t.style.fontSize = px + 'px'; });
     });
+    const nt = win.querySelector('[data-lwnewterm]');
+    if (nt) nt.onclick = e => { e.stopPropagation(); spawnTerminalWin(); };
 
     // ---- drag the header: move freely, preview/commit a snap zone ----
     const grip = win.querySelector('[data-lwgrip]');
@@ -3989,24 +4026,36 @@
     };
   }
 
-  /* ---- brick: Terminal — the same running session as the Terminal app ---- */
+  /* ---- brick: Terminal — 'terminal' shares the app's session; every extra
+     window (term:2, term:3, …, spawned by the + button) is its OWN shell
+     session, independent scrollback/cwd/history, running concurrently. ---- */
   const ltFontPx = () => Math.max(9, Math.min(16, +PREF.get('ltFontPx', 11.5) || 11.5));
-  function lwMountTerminal(box) {
-    ensureTermSession();
-    box.innerHTML = `<div class="term lt-term" style="font-size:${ltFontPx()}px">${termLinesHTML()}${termLiveRowHTML('lt-in')}</div>`;
+  function lwMountTerminal(box, winId) {
+    const T = termSession(winSid(winId));
+    box.innerHTML = `<div class="term lt-term" style="font-size:${ltFontPx()}px">${termLinesHTML(T)}${termLiveRowHTML(T, 'lt-in')}</div>`;
     const t = box.firstElementChild;
     t.scrollTop = t.scrollHeight;
     wireTermStop(t, false);
     const inp = t.querySelector('.term-in');
-    if (inp) wireTermInput(t, inp, redrawLiveTermBrick);
+    if (inp) wireTermInput(T, t, inp, () => redrawTermWin(winId));
   }
-  function redrawLiveTermBrick() {
-    const t = document.querySelector('#liveWins .lt-win[data-lw="terminal"] .lt-term'); if (!t) return;
-    t.innerHTML = termLinesHTML() + termLiveRowHTML('lt-in');
+  function redrawTermWin(winId) {
+    const t = document.querySelector(`#liveWins .lt-win[data-lw="${winId}"] .lt-term`); if (!t) return;
+    const T = termSession(winSid(winId));
+    t.innerHTML = termLinesHTML(T) + termLiveRowHTML(T, 'lt-in');
     t.scrollTop = t.scrollHeight;
     wireTermStop(t, false);   // tap to stop; no focus steal from a brick
     const inp = t.querySelector('.term-in');
-    if (inp) { wireTermInput(t, inp, redrawLiveTermBrick); if (!lwGet('terminal').min) inp.focus(); }
+    if (inp) { wireTermInput(T, t, inp, () => redrawTermWin(winId)); if (!lwGet(winId).min) inp.focus(); }
+  }
+  // One more shell, in its own window — cascaded a little so they don't stack.
+  function spawnTerminalWin() {
+    const open = lwIds().filter(x => (x === 'terminal' || x.startsWith('term:')) && lwGet(x).on);
+    if (open.length >= 4) { toast('Four terminals is plenty for one screen', '', 'terminal'); return; }
+    let n = 2;
+    while (lwGet('term:' + n).on) n++;
+    lwSet('term:' + n, { on: true, min: false, z: lwMaxZ() + 1 });
+    syncLiveBricks();
   }
 
   /* ---- brick: Monitor — live CPU / memory / uptime, honest and system-wide ---- */
@@ -4265,7 +4314,7 @@
       if (stillOn(id)) drawFiles(id);
     };
     $('#screenScroll').querySelector('[data-fmhidden]').onclick = () => { S.fmHidden = !S.fmHidden; drawFiles(id); };
-    $('#screenScroll').querySelector('[data-fmterm]').onclick = () => { S.termCwd = data.path; go('terminal'); };
+    $('#screenScroll').querySelector('[data-fmterm]').onclick = () => { termSession('main').cwd = data.path; go('terminal'); };
   }
 
   async function openFileSheet(e, dir, id) {
