@@ -570,8 +570,34 @@ const Sov = (() => {
     },
     async exec(cmd, cwd) {
       // tries:1 — a shell command must never be silently re-run by a retry.
-      if (mode === 'live') { const r = await post('/api/exec', { cmd, cwd }, 25000, 1); if (r) return r; }
+      // Timeout rides above the agent's own 120s command ceiling.
+      if (mode === 'live') { const r = await post('/api/exec', { cmd, cwd }, 125000, 1); if (r) return r; }
       return SIM.exec(cmd, cwd);
+    },
+    async execCancel() {
+      // Stop the running Terminal command (Ctrl-C). The pending exec() call
+      // then resolves on its own with the partial output and rc 130.
+      if (mode === 'live') { const r = await post('/api/exec/cancel', {}, 6000, 1); if (r) return r; }
+      return { ok: true, stopped: false };   // sim commands are instant — nothing to stop
+    },
+    async complete(word, isFirst, cwd) {
+      // Tab completion for the Terminal: command names at the start of a line,
+      // files/dirs (dirs get a trailing /) elsewhere. Live rides the same
+      // /api/exec route the terminal itself uses — a throwaway compgen, no new
+      // agent surface; sim completes from the preview shell's own commands.
+      if (mode === 'live') {
+        const q = "'" + String(word || '').replace(/'/g, "'\\''") + "'";
+        const script = isFirst
+          ? 'compgen -c -- ' + q + ' 2>/dev/null | sort -u | head -60'
+          : 'w=' + q + '; w="${w/#\\~/$HOME}"; { compgen -d -- "$w" | sed "s:\\$:/:"; compgen -f -- "$w"; } 2>/dev/null | sort -u | head -60';
+        const r = await post('/api/exec', { cmd: script, cwd }, 10000, 1);
+        if (r && typeof r.out === 'string' && r.rc !== 124)
+          return r.out ? r.out.split('\n').filter(Boolean) : [];
+        return [];
+      }
+      const CMDS = ['cat', 'cd', 'clear', 'date', 'df', 'echo', 'env', 'free', 'help',
+        'hostname', 'id', 'ls', 'ps', 'pwd', 'uname', 'uptime', 'whoami'];
+      return isFirst ? CMDS.filter(c => c.startsWith(word || '')) : [];
     },
     async getTimezone() {
       if (mode === 'live') { const r = await getJSON('/api/timezone'); if (r) return r.timezone; }

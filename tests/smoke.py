@@ -203,6 +203,30 @@ def main():
         check("geocode guards short queries (no egress)",
               st == 200 and d.get("results") == [])
 
+        # ---- Terminal exec + cancel (a real Ctrl-C over the API) ----
+        st, d = j("/api/exec", token, "POST", {"cmd": "echo smoke-$((6*7))"})
+        check("exec runs a real command", st == 200 and "smoke-42" in d.get("out", ""))
+        st, d = j("/api/exec/cancel", token, "POST", {})
+        check("cancel with nothing running is an honest no-op",
+              st == 200 and d.get("ok") is True and d.get("stopped") is False)
+        # cancel actually interrupts: a long sleep dies early with SIGINT (130)
+        import threading as _thr
+        box = {}
+        def _long():
+            box["st"], box["d"] = j("/api/exec", token, "POST", {"cmd": "sleep 30; echo survived"})
+        t = _thr.Thread(target=_long); t0 = time.time(); t.start()
+        time.sleep(1.2)                     # let the sleep start
+        st, d = j("/api/exec/cancel", token, "POST", {})
+        check("cancel reports it stopped the command", d.get("stopped") is True)
+        t.join(timeout=12)
+        el = time.time() - t0
+        rc = box.get("d", {}).get("rc")
+        check("cancelled command returns promptly with SIGINT rc + ^C",
+              not t.is_alive() and el < 12 and rc in (130, -2, -9)
+              and "survived" not in box.get("d", {}).get("out", "")
+              and "^C" in box.get("d", {}).get("out", ""),
+              f"elapsed={el:.1f}s rc={rc}")
+
         # ---- Cellular (honest degrade, no modem attached) ----
         st, d = j("/api/phone/status", token)
         check("phone status honest (present:false)", d.get("available") is True and d.get("present") is False)

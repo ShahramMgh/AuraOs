@@ -203,6 +203,9 @@
     const w = weatherOn() && _wx.data && _wx.data.available ? _wx.data : null;
     el.innerHTML = w ? `${ic(wxIcon(w), 14)}<span>${esc(wxReading(w))}</span>` : '';
     el.classList.toggle('on', !!w);
+    // The reading loads after the hero was laid out; re-measure so a tall/
+    // wrapped reading grows the reservation instead of overlapping below it.
+    requestAnimationFrame(reconcileClockSpan);
   }
 
   function applyEffects() {
@@ -298,7 +301,7 @@
     </div>
     <div id="radial"></div>
     <div id="appframe"></div>
-    <div id="liveTerm"></div>
+    <div id="liveWins"></div>
     <div id="recents"></div>
     <div id="insScrim"></div>
     <div id="insight" class="side-left hidden"></div>
@@ -400,7 +403,9 @@
   // Continuous size, not a binary preset: drag the handle in edit mode, or
   // pick a quick preset in Personalize — both write the same number. Falls
   // back to the old regular/large preset once, for anyone who set it before.
+  let _clockScaleLive = null;   // transient scale while the resize handle is mid-drag
   const clockScale = () => {
+    if (_clockScaleLive != null) return _clockScaleLive;
     const v = PREF.get('clockScale', null);
     if (v != null) return Math.max(.7, Math.min(1.8, +v || 1));
     return PREF.get('clockSize', 'regular') === 'large' ? 1.3 : 1;
@@ -417,14 +422,76 @@
      and snaps to a row, exactly like icons snap to cells.
      Stored as PREF 'homeWidgets': { clock: {page,row,seq}, focus: …, upnext: … }
      — row null means "auto: stack after the previous widget". */
-  const W_ORDER = ['clock', 'focus', 'upnext'];
-  // The clock hero's row span follows its size, so growing the clock can never
-  // spill onto the rows below it — the grid reserves more rows instead.
-  const HERO_BASE_H = 170;                       // clock+date+weather+status, scale 1
+  const W_ORDER = ['clock', 'focus', 'upnext', 'search'];
+  // The clock hero's row span follows its TRUE height, so growing the clock —
+  // by scale, style, or switching weather on — can never spill onto the rows
+  // below it: the grid reserves exactly enough rows, never fewer.
   const ROW_H = () => 84 + 14;                   // grid-auto-rows + row-gap (see CSS)
+  // The non-scaling parts of the hero, stacked under the clock face. These do
+  // NOT zoom (only .clockw does — see CSS), so they're a fixed pixel budget.
+  const HERO_DATE_H   = 24;                       // date line + its margin-top
+  const HERO_WX_H     = 23;                       // weather line + its margin-top (opt-in)
+  const HERO_STATUS_H = 45;                       // privacy status pill + its margin-top
+  // The clock face height per style at scale 1 — the part that zoom() grows.
+  // Kept slightly generous; the post-render measure below is the real backstop.
+  const CLOCK_FACE_H = { aura: 74, minimal: 50, mono: 54, stacked: 120, analog: 132, words: 116 };
+  // What identifies a hero layout for measurement caching: anything that
+  // changes its height. Weather counts as ON the moment it's opted in, so the
+  // row is reserved BEFORE the async reading pops in — no late overlap.
+  const clockKey = () => `${clockStyle()}|${clockScale().toFixed(3)}|${weatherOn() ? 1 : 0}`;
+  let _clockMeasure = { key: null, h: 0 };        // last measured hero height, keyed
+  // Analytic height of the hero (before we've measured the real thing): the
+  // scaling face + the fixed stack + weather when it's opted in.
+  function estHeroHeight() {
+    const face = (CLOCK_FACE_H[clockStyle()] || CLOCK_FACE_H.aura) * clockScale();
+    return face + HERO_DATE_H + (weatherOn() ? HERO_WX_H : 0) + HERO_STATUS_H;
+  }
   function widgetSpan(id) {
-    if (id === 'clock') return Math.max(2, Math.ceil((HERO_BASE_H * clockScale()) / ROW_H()));
-    return 1;                                    // focus card · Up next: one row each
+    // +row-gap: N spanned rows give N*84 + (N-1)*14 of height, so the content
+    // must fit N*ROW_H - 14 — without this, a mid-scale clock could overhang
+    // its last reserved row by a few pixels and shade the row below.
+    if (id === 'clock') {
+      // Estimate is the floor (it already reserves for opted-in weather); a
+      // real measurement of the current layout can only push it TALLER, never
+      // shorter — so tall styles/fonts can't underflow into an overlap.
+      const measured = _clockMeasure.key === clockKey() ? _clockMeasure.h : 0;
+      const h = Math.max(estHeroHeight(), measured);
+      return Math.max(2, Math.ceil((h + 14) / ROW_H()));
+    }
+    return 1;                                    // focus card · Up next · search: one row each
+  }
+  // After a home render, measure the clock hero for real and, if it's taller
+  // than we reserved (an odd font, a locale, a style we under-guessed), grow
+  // the span and re-render once. Idempotent: the second pass measures the same
+  // height, the cache already holds it, so it stops. The no-overlap backstop.
+  function reconcileClockSpan() {
+    if (_clockScaleLive != null) return;          // mid resize-drag: estimate governs
+    const hero = document.querySelector('.hw-clock .aura-hero');
+    if (!hero) return;
+    const key = clockKey(), h = hero.offsetHeight;
+    const known = _clockMeasure.key === key ? _clockMeasure.h : 0;
+    if (h <= known) return;                        // nothing new to learn
+    const before = widgetSpan('clock');
+    _clockMeasure = { key, h };
+    if (widgetSpan('clock') > before) renderHome(); // reservation grew → reflow
+  }
+  // Where the search pill sits when the user hasn't placed it: the bottom row
+  // of the page (a launcher's search belongs near the thumb), measured from
+  // the pager if it's live, else estimated from the stage.
+  function defaultSearchRow() {
+    const pager = $('#homePager'), stage = $('#stage');
+    const h = (pager && pager.clientHeight)
+      || ((stage && stage.clientHeight ? stage.clientHeight : 640) - 96);
+    return Math.max(3, Math.floor(h / ROW_H()) - 1);
+  }
+  // How many icon slots one home page really holds: the rows that FIT the
+  // pager, times 3 columns. A page is a fixed canvas, never a scroll — this
+  // is the ceiling the overflow pass enforces (see homeLayout).
+  function pageCap() {
+    const pager = $('#homePager'), stage = $('#stage');
+    const h = (pager && pager.clientHeight)
+      || ((stage && stage.clientHeight ? stage.clientHeight : 640) - 96);
+    return Math.max(4, Math.floor(h / ROW_H())) * 3;
   }
   function widgetPos() {
     let w = PREF.get('homeWidgets', null);
@@ -446,20 +513,39 @@
     const add = (id, on) => {
       if (!on) return;
       const p = pos[id] || {};
+      let row = (p.row == null ? null : Math.max(0, p.row | 0));
+      // the search pill defaults to the bottom row, not the top auto-stack
+      if (id === 'search' && row == null) row = defaultSearchRow();
       act.push({ id, span: widgetSpan(id),
         page: Math.max(0, Math.min((pageCount || 1) - 1, p.page || 0)),
-        row: (p.row == null ? null : Math.max(0, p.row | 0)), seq: p.seq || 0 });
+        row, seq: p.seq || 0 });
     };
     add('clock', true);
     add('focus', showFocus);
-    add('upnext', PREF.get('upnext', true));
+    // "Up next" only exists when there IS a next event — an empty widget
+    // would block a whole grid row and read as a dead band under the clock.
+    add('upnext', PREF.get('upnext', true) && !!_upnext.ev);
+    add('search', PREF.get('homeSearchBar', true));
     const byPage = {};
     act.forEach(w => (byPage[w.page] = byPage[w.page] || []).push(w));
     Object.values(byPage).forEach(list => {
-      list.sort((a, b) => (a.row == null) - (b.row == null)
-        || (a.row || 0) - (b.row || 0) || b.seq - a.seq);
+      // One vertical stack, top to bottom. A fixed row is an ANCHOR (recently
+      // moved wins a contested row); autos keep W_ORDER and flow into the
+      // earliest open space. Crucially, a widget that grows or moves pushes
+      // everything after it DOWN — a fixed widget below never makes a growing
+      // one jump around it, it yields and slides down instead.
+      const fixedQ = list.filter(w => w.row != null).sort((a, b) => a.row - b.row || b.seq - a.seq);
+      const autoQ = list.filter(w => w.row == null);
       let next = 0;
-      list.forEach(w => { w.row = w.row == null ? next : Math.max(w.row, next); next = w.row + w.span; });
+      while (fixedQ.length || autoQ.length) {
+        let w;
+        if (fixedQ.length && (!autoQ.length || fixedQ[0].row <= next)) {
+          w = fixedQ.shift(); w.row = Math.max(w.row, next);
+        } else {
+          w = autoQ.shift(); w.row = next;
+        }
+        next = w.row + w.span;
+      }
     });
     return act;
   }
@@ -561,12 +647,20 @@
     return ev.time ? `${day} · ${ev.time}` : day;
   }
   async function paintUpNext() {
-    const slot = $('#upnextSlot'); if (!slot) return;
-    if (!PREF.get('upnext', true)) { slot.innerHTML = ''; return; }
+    if (!PREF.get('upnext', true)) { const s = $('#upnextSlot'); if (s) s.innerHTML = ''; return; }
     if (Date.now() - _upnext.at > 60000) {   // fresh enough for a home widget, cheap on the agent
       _upnext.at = Date.now();
       try { _upnext.ev = nextEvent(await Sov.calendar.list()); } catch (e) { _upnext.ev = null; }
     }
+    // The widget exists only while an event does (resolveWidgets) — when that
+    // changes, the grid reshapes, so re-render instead of patching. Never
+    // mid-edit: yanking a row out from under a drag would be hostile.
+    const slot = $('#upnextSlot');
+    if (!!_upnext.ev !== !!slot) {
+      if (S.view === 'home' && !S.appOpen && !S.homeEdit) renderHome();
+      return;
+    }
+    if (!slot) return;
     const ev = _upnext.ev;
     const key = ev ? `${ev.id}|${ev.title}|${ev.date}|${ev.time}` : '';
     if (slot.dataset.k === key) return;   // patch only on change, so ticks don't re-pop it
@@ -618,21 +712,30 @@
     }
     return Sov.app(id);
   }
-  // Put a freshly-installed Android app onto the home screen (last page), the way
-  // a phone drops a new app on your home screen.
-  function addAndroidToHome(pkg, name) {
-    const id = 'android:' + pkg;
-    const names = PREF.get('androidApps', {}); names[pkg] = name || pkg; PREF.set('androidApps', names);
+  const onHomeAlready = id => homePagesIds().some(p => (p || []).includes(id));
+  // Put any app onto the home screen, the way a phone drops a new app there:
+  // the first empty slot (a gap) if one exists, else the end of the last page.
+  // homeLayout's overflow pass then reflows it onto a further page (creating
+  // one if needed) when that page is already full — never below the fold.
+  function addToHome(id) {
     const pgs = homePagesIds().map(p => (p || []).slice());
     if (!pgs.length) pgs.push([]);
-    if (!pgs.some(p => p.includes(id))) {
-      // Fill the first empty slot (a gap) if there is one, else take a new slot
-      // at the end — a new app shouldn't punch a hole that a gap could absorb.
-      let placed = false;
-      for (const p of pgs) { const e = p.indexOf(null); if (e !== -1) { p[e] = id; placed = true; break; } }
-      if (!placed) pgs[pgs.length - 1].push(id);
-      PREF.set('homePages', pgs);
-    }
+    if (pgs.some(p => p.includes(id))) return false;
+    let placed = false;
+    for (const p of pgs) { const e = p.indexOf(null); if (e !== -1) { p[e] = id; placed = true; break; } }
+    if (!placed) pgs[pgs.length - 1].push(id);
+    PREF.set('homePages', pgs);
+    return true;
+  }
+  // Take an app off home: null the slot (keep positions) rather than filter,
+  // which would shift every later icon up a cell.
+  function removeFromHome(id) {
+    PREF.set('homePages', homePagesIds().map(p => (p || []).map(a => a === id ? null : a)));
+  }
+  // A freshly-installed Android app lands on home like any other app.
+  function addAndroidToHome(pkg, name) {
+    const names = PREF.get('androidApps', {}); names[pkg] = name || pkg; PREF.set('androidApps', names);
+    addToHome('android:' + pkg);
     _androidApps = null;   // drawer refetches
   }
   // Uninstalling an Android app removes it from home + name map everywhere.
@@ -661,15 +764,86 @@
     // the first free, unblocked cell. Deterministic, and persisted so the
     // layout is stable on the next render.
     let changed = false;
-    raw.forEach((p, pi) => {
+    const cap = pageCap();
+    // Sequential so an overflowing page can spill into the next one, and THAT
+    // page's own pass then handles what arrived (raw can grow mid-loop).
+    for (let pi = 0; pi < raw.length; pi++) {
+      const p = raw[pi];
       const blocked = blockedSlotSet(widgets, pi);
-      for (let s = 0; s < p.length; s++) {
-        if (p[s] == null || !blocked.has(s)) continue;
-        let t = 0;
-        while (blocked.has(t) || p[t] != null) t++;
-        p[t] = p[s]; p[s] = null; changed = true;
+      // Push-down repair: an icon in a widget-covered cell shifts into the
+      // next open cell, rippling the icons after it along (order preserved);
+      // deliberate gaps further down absorb the shift. So a growing widget
+      // pushes icons downward like a physical stack — never on top of them,
+      // and never teleporting one to some far free cell.
+      const q = [];
+      for (let s = 0; s < p.length || q.length; s++) {
+        if (blocked.has(s)) {
+          if (p[s] != null) { q.push(p[s]); p[s] = null; changed = true; }
+          continue;
+        }
+        if (!q.length) continue;
+        if (p[s] != null) q.push(p[s]);
+        p[s] = q.shift(); changed = true;
       }
-    });
+      // OVERFLOW PASS — a page is a fixed canvas, never a scroll. Anything
+      // past the last row that fits (widgets included pushed it there) spills
+      // onto the NEXT page: into its gaps first, else appended — and a new
+      // page is created when there isn't one. Cascades page by page.
+      if (p.length > cap) {
+        const spill = p.splice(cap).filter(id => id != null);
+        changed = true;
+        if (spill.length) {
+          if (pi + 1 >= raw.length) raw.push([]);
+          const np = raw[pi + 1], nblocked = blockedSlotSet(widgets, pi + 1);
+          spill.forEach(id => {
+            let s = 0;
+            while (s < cap && (nblocked.has(s) || np[s] != null)) s++;
+            if (s < cap) np[s] = id;
+            else np.push(id);   // past that page's cap too — its own pass cascades it on
+          });
+        }
+      }
+    }
+    // STICKY LAYOUT (optional — Style sheet / Personalize): rows glue
+    // together like magnets. Any fully-empty row — left by a shrinking
+    // clock, a removed icon row or a moved widget — collapses, and every
+    // widget and icon below jumps back UP. Growing pushes down (the stack
+    // pass above), shrinking pulls up (this pass): the two halves of
+    // "nothing floats, nothing overlaps". Rows that still hold an icon keep
+    // their column gaps — only whole empty bands vanish.
+    if (PREF.get('homeSticky', true)) {
+      raw.forEach((p, pi) => {
+        const pw = widgets.filter(w => w.page === pi);
+        const maxRow = Math.max(Math.ceil(p.length / 3) - 1,
+          ...pw.map(w => w.row + w.span - 1), 0);
+        const used = r => pw.some(w => r >= w.row && r < w.row + w.span)
+          || p[r * 3] != null || p[r * 3 + 1] != null || p[r * 3 + 2] != null;
+        const map = []; let shift = 0;
+        for (let r = 0; r <= maxRow; r++) map[r] = used(r) ? r - shift : (shift++, null);
+        if (!shift) return;
+        pw.forEach(w => { if (map[w.row] != null) w.row = map[w.row]; });
+        const np = [];
+        p.forEach((id, s) => {
+          if (id == null) return;
+          const nr = map[(s / 3) | 0];
+          if (nr != null) np[nr * 3 + s % 3] = id;
+        });
+        p.length = 0;
+        for (let i = 0; i < np.length; i++) p[i] = np[i] == null ? null : np[i];
+        changed = true;
+      });
+      // Keep stored widget anchors in the same (collapsed) frame the user
+      // sees, so drag/drop math and this pass always agree.
+      if (PREF.get('homeWidgets', null)) {
+        const pos = widgetPos();
+        let wchanged = false;
+        widgets.forEach(w => {
+          const p0 = pos[w.id];
+          if (p0 && p0.row != null && p0.row !== w.row) { p0.row = w.row; wchanged = true; }
+        });
+        if (wchanged) PREF.set('homeWidgets', pos);
+      }
+    }
     // Persist the repair only when the user already owns a layout — a repair
     // of the config-driven default stays derived (recomputed each render, same
     // result), so the default keeps following home.config.json until the user
@@ -692,14 +866,18 @@
       seen.add(a.id); return a;
     }));
     if (pages.every(p => !p.some(Boolean))) {
-      // first run: lay the catalog into page 0, skipping widget-covered cells
-      const blocked = blockedSlotSet(widgets, 0);
-      const laid = []; let s = 0;
+      // First run: lay the catalog page by page — skip widget-covered cells,
+      // and when a page's rows are full, continue on the next page (created
+      // as needed) instead of piling everything onto page 0.
+      pages.length = 0; pages.push([]);
+      let s = 0, pi = 0, blocked = blockedSlotSet(widgets, 0);
       apps.filter(a => a.id !== focus.id).forEach(a => {
-        while (blocked.has(s)) laid[s++] = null;
-        laid[s++] = a;
+        while (s >= cap || blocked.has(s)) {
+          if (s >= cap) { pi++; s = 0; pages.push([]); blocked = blockedSlotSet(widgets, pi); }
+          else pages[pi][s++] = null;
+        }
+        pages[pi][s++] = a;
       });
-      pages[0] = laid;
     }
     return { cfg, focus, pages, widgets, showFocus };
   }
@@ -722,6 +900,8 @@
       const body = w.id === 'clock'
         ? `<section class="aura-hero align-${clockAlign()}" style="--clock-scale:${clockScale()}">${heroInner}</section>`
         : w.id === 'focus' ? focusCardHTML(focus, cfg)
+        : w.id === 'search'
+          ? `<button class="home-search" id="homeSearch">${ic('search',16)}<span>Search apps, files, everything</span></button>`
         : `<div class="upnext-slot" id="upnextSlot"></div>`;
       return `<div class="home-widget hw-${w.id}" data-widget="${w.id}"
         style="grid-column:1 / -1;grid-row:${w.row + 1} / span ${w.span}">${body}</div>`;
@@ -737,9 +917,10 @@
             ps.map((app, i) => app ? homeTile(app, i) : '').join('')}</div></section>`).join('')}</div>
         ${pages.length > 1 ? `<div class="page-dots" id="pageDots">${pages.map((_, pi) =>
           `<button class="pdot ${pi === 0 ? 'on' : ''}" data-pdot="${pi}" aria-label="Page ${pi + 1}"></button>`).join('')}</div>` : ''}
-        <button class="home-search" id="homeSearch">${ic('search',16)}<span>Search apps, files, everything</span></button>
         <div class="home-edit-bar">
           <button class="heb-btn" data-hedit="wallpaper">${ic('sun',15)}<span>Wallpaper</span></button>
+          <button class="heb-btn" data-hedit="style">${ic('spark',15)}<span>Style</span></button>
+          <button class="heb-btn" data-hedit="tidy">${ic('layers',15)}<span>Tidy</span></button>
           <button class="heb-btn" data-hedit="addpage">${ic('grid',15)}<span>Add page</span></button>
           <button class="heb-btn done" data-hedit="done">Done</button>
         </div>
@@ -759,7 +940,10 @@
     maybeSuggest();   // the resident may gently offer a learned routine (async)
     paintUpNext();    // the next real calendar event, if any (async)
     paintWeather();   // the live reading, if the user turned weather on
-    syncLiveTermBrick();
+    syncLiveBricks();
+    // Backstop: measure the real hero and grow its reservation if we under-
+    // guessed, so nothing below the clock is ever overlapped (rAF: post-layout).
+    requestAnimationFrame(reconcileClockSpan);
   }
 
   const activeSensorKinds = () => Object.keys(Sov.get().sensors);   // 'mic'|'cam'|'loc'
@@ -807,7 +991,7 @@
     return `
       <button class="tile ${using}" data-launch="${app.id}" data-slot="${slot}"
               style="--col:${app.color};--i:${slot};grid-column:${col};grid-row:${row}">
-        ${del}<span class="tile-ic"><span class="tile-glow"></span><span class="tile-dot"></span>${ic(app.glyph, 24)}${img}</span>
+        ${del}<span class="tile-ic"><span class="tile-glow"></span><span class="tile-dot"></span>${ic(app.glyph, 26)}${img}</span>
         <span class="tile-lbl">${esc(app.name)}</span>
       </button>`;
   }
@@ -875,6 +1059,25 @@
     $$('#v-home [data-hedit]').forEach(b => b.onclick = () => {
       const a = b.dataset.hedit;
       if (a === 'done') { S.homeEdit = false; renderHome(); }
+      else if (a === 'style') openStyleSheet();
+      else if (a === 'tidy') {
+        // Compact: pull every icon up into the earliest open cells (order
+        // preserved, widget rows skipped) — clears the gaps left behind by
+        // removed icons and by widgets that moved or shrank. Opt-in, because
+        // deliberate gaps are a feature; this is the one-tap way out.
+        const { pages, widgets } = homeLayout();
+        PREF.set('homePages', pages.map((p, pi) => {
+          const blocked = blockedSlotSet(widgets, pi);
+          const arr = []; let s = 0;
+          p.filter(Boolean).forEach(app => {
+            while (blocked.has(s)) arr[s++] = null;
+            arr[s++] = app.id;
+          });
+          return arr;
+        }));
+        renderHome();
+        toast('Icons tidied', 'ok', 'check');
+      }
       else if (a === 'addpage') {
         const pgs = homePagesIds().slice(); pgs.push([]); PREF.set('homePages', pgs);
         renderHome();
@@ -928,23 +1131,39 @@
   }
 
   // The clock's size handle (bottom-right, edit mode only) — continuous
-  // scale, not a preset. Live-previews via the CSS var while dragging, then
-  // persists and re-renders once, same pattern as the position drag above.
+  // scale, not a preset. The zoom previews live via the CSS var, and the
+  // moment the size crosses a grid-row boundary the WHOLE page reflows
+  // (renderHome): widgets below slide down to make room, icons shift out of
+  // the newly covered cells — nothing overlaps, even mid-drag. Listeners
+  // live on window so the reflow (which replaces the handle) can't kill the
+  // gesture; the transient scale rides in _clockScaleLive until release.
   function wireClockResize() {
-    const handle = $('#clkResize'), hero = $('.aura-hero');
-    if (!handle || !hero || !S.homeEdit) return;
+    const handle = $('#clkResize');
+    if (!handle || !S.homeEdit) return;
     handle.onpointerdown = e => {
       e.preventDefault(); e.stopPropagation();
-      try { handle.setPointerCapture(e.pointerId); } catch (err) {}
       const sx = e.clientX, s0 = clockScale();
+      let lastSpan = widgetSpan('clock');
       const scaleAt = ev => Math.max(.7, Math.min(1.8, s0 + (ev.clientX - sx) / 160));
-      handle.onpointermove = ev => hero.style.setProperty('--clock-scale', scaleAt(ev).toFixed(3));
+      const move = ev => {
+        _clockScaleLive = scaleAt(ev);
+        const span = widgetSpan('clock');
+        if (span !== lastSpan) { lastSpan = span; renderHome(); return; }
+        const hero = $('.aura-hero');
+        if (hero) hero.style.setProperty('--clock-scale', _clockScaleLive.toFixed(3));
+      };
       const up = ev => {
-        handle.onpointermove = handle.onpointerup = handle.onpointercancel = null;
-        PREF.set('clockScale', scaleAt(ev));
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', up);
+        window.removeEventListener('pointercancel', up);
+        const sc = scaleAt(ev);
+        _clockScaleLive = null;
+        PREF.set('clockScale', sc);
         renderHome();
       };
-      handle.onpointerup = up; handle.onpointercancel = up;
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up);
+      window.addEventListener('pointercancel', up);
     };
   }
 
@@ -967,6 +1186,227 @@
       scrim.classList.remove('open');
       setTimeout(() => { if (!scrim.classList.contains('open')) scrim.innerHTML = ''; }, 200);
     };
+  }
+
+  // Long-press home › Style — the quick customization sheet. Accent theme,
+  // icon shape, labels and the ambient effect in one place, applied live;
+  // the deeper options stay in Personalize. All device-local, via PREF.
+  function openStyleSheet() {
+    const scrim = $('#promptScrim');
+    const close = () => {
+      scrim.classList.remove('open');
+      setTimeout(() => { if (!scrim.classList.contains('open')) scrim.innerHTML = ''; }, 200);
+    };
+    const paint = () => {
+      const theme = PREF.get('theme', 'teal'), shape = PREF.get('tileShape', 'squircle');
+      const fx = PREF.get('fx', 'aurora'), labels = PREF.get('tileLabels', true);
+      const sticky = PREF.get('homeSticky', true);
+      scrim.innerHTML = `<div class="prompt-card style-sheet">
+        <div class="pc-title">Home style</div>
+        <div class="ss-lbl">Accent</div>
+        <div class="ss-swatches">${THEMES.map(t =>
+          `<button class="ss-sw ${t.id === theme ? 'on' : ''}" data-th="${t.id}" style="--sw:${t.accent}" aria-label="${t.name}">${t.id === theme ? ic('check', 14) : ''}</button>`).join('')}</div>
+        <div class="ss-lbl">Icon shape</div>
+        <div class="seg ss-seg">${TILE_SHAPES.map(s =>
+          `<button class="${s.id === shape ? 'on acc' : ''}" data-shape="${s.id}">${s.name}</button>`).join('')}</div>
+        <div class="ss-lbl">Ambience</div>
+        <div class="ss-fx">${FX.map(f =>
+          `<button class="ss-fxc ${f.id === fx ? 'on' : ''}" data-fxpick="${f.id}">${esc(f.name)}</button>`).join('')}</div>
+        <button class="ss-row" data-lbls><span>Icon labels</span>
+          <span class="switch ${labels ? 'on' : ''}"></span></button>
+        <button class="ss-row" data-sticky>
+          <span>Sticky layout<small class="ss-sub">Rows glue together — no empty bands</small></span>
+          <span class="switch ${sticky ? 'on' : ''}"></span></button>
+        <div class="ss-btns">
+          <button class="pbtn ghost" data-more>${ic('gear',14)} Personalize</button>
+          <button class="pbtn allow" data-close>Done</button>
+        </div></div>`;
+      scrim.querySelectorAll('[data-th]').forEach(b => b.onclick = () => { PREF.set('theme', b.dataset.th); applyTheme(); paint(); });
+      scrim.querySelectorAll('[data-shape]').forEach(b => b.onclick = () => { PREF.set('tileShape', b.dataset.shape); applyIconStyle(); paint(); });
+      scrim.querySelectorAll('[data-fxpick]').forEach(b => b.onclick = () => { PREF.set('fx', b.dataset.fxpick); applyEffects(); paint(); });
+      scrim.querySelector('[data-lbls]').onclick = () => { PREF.set('tileLabels', !PREF.get('tileLabels', true)); applyIconStyle(); paint(); };
+      scrim.querySelector('[data-sticky]').onclick = () => {
+        PREF.set('homeSticky', !PREF.get('homeSticky', true));
+        renderHome(); paint();
+      };
+      scrim.querySelector('[data-more]').onclick = () => { close(); S.homeEdit = false; go('personalize'); };
+      scrim.querySelector('[data-close]').onclick = close;
+    };
+    paint();
+    scrim.classList.add('open');
+  }
+
+  // One human line per built-in app, for the long-press info card — what it
+  // is AND what it touches, in the OS's own plain-privacy voice.
+  const APP_ABOUT = {
+    phone: 'Calls over the cellular modem. The mic is only live during a call.',
+    messages: 'SMS conversations — they live in the modem and on this device.',
+    contacts: 'Your people, stored only on this device.',
+    browser: 'The open web. Every connection it makes shows up in Network.',
+    assistant: 'The Aura — on-device intelligence. Nothing leaves without asking.',
+    appstore: 'Free & open apps from F-Droid, installed into the Android layer.',
+    camera: 'Photos & video. The indicator lights whenever the sensor is live.',
+    photos: 'Your pictures, read from ~/Pictures. No cloud, no scanning.',
+    music: 'A local player for your own library.',
+    maps: 'Maps & navigation. Location is used only while you look.',
+    files: 'Everything on the device, encrypted at rest.',
+    notes: 'Quick thoughts, kept locally.',
+    calc: 'A calculator. It needs nothing and touches nothing.',
+    clock: 'Alarms, timers and the home clock widget.',
+    calendar: 'Your schedule — the "Up next" widget reads from here.',
+    terminal: 'A real shell into the OS. It is your device, after all.',
+    sync: 'Device-to-device sync over the local network. No server in between.',
+    monitor: 'CPU, memory and processes, honestly reported.',
+    settings: 'The whole system — inspectable and reversible.',
+  };
+
+  // The app-info card: long-press a home tile (an iOS-style peek). Identity,
+  // a plain-language description, what it can access right now, and actions.
+  function openAppInfo(app) {
+    const scrim = $('#promptScrim');
+    const close = () => {
+      scrim.onclick = null;
+      scrim.classList.remove('open');
+      setTimeout(() => { if (!scrim.classList.contains('open')) scrim.innerHTML = ''; }, 200);
+    };
+    const perms = Sov.perms(app.id) || {};
+    const live = Sov.activeSensorsFor(app.id);
+    const running = Sov.running().some(r => r.appId === app.id);
+    const needs = [...new Set([...(app.uses || []).map(s => SENS2PERM[s]), ...(app.perms || [])])];
+    const permName = { camera: 'Camera', mic: 'Microphone', location: 'Location', contacts: 'Contacts', files: 'Files' };
+    const chips = [
+      ...needs.map(k => `<span class="aic-chip ${(perms[k] || 'ask') === 'allow' ? 'on' : ''}">${esc(permName[k] || k)}${(perms[k] || 'ask') === 'allow' ? ' · allowed' : ''}</span>`),
+      app.net ? `<span class="aic-chip net">${ic('globe',11)} Network</span>`
+              : `<span class="aic-chip offline">${ic('shieldChk',11)} On-device only</span>`,
+    ].join('');
+    const about = app.android
+      ? 'An Android app in the native Android layer — sandboxed, memory-capped, running on demand.'
+      : (APP_ABOUT[app.id] || 'A built-in app.');
+    scrim.innerHTML = `<div class="prompt-card app-info">
+      <div class="aic-head">
+        <span class="aic-ic" style="--col:${app.color}">${ic(app.glyph, 30)}</span>
+        <span class="aic-t"><span class="aic-name">${esc(app.name)}</span>
+        <span class="aic-sub">${esc(app.android ? 'Android · ' + app.pkg : (app.cat || 'App') + ' · built-in')}${running ? ' · running' : ''}</span></span>
+      </div>
+      <div class="aic-about">${esc(about)}</div>
+      ${live.length ? `<div class="aic-live">${ic('eye',13)}<span>Using ${live.map(s => ({ mic: 'microphone', cam: 'camera', loc: 'location' }[s])).join(', ')} right now</span></div>` : ''}
+      <div class="aic-chips">${chips}</div>
+      <div class="aic-actions">
+        <button class="pbtn allow" data-ai-open>Open</button>
+        <button class="pbtn ghost" data-ai-perms>${ic('shieldChk',14)} Permissions</button>
+        <button class="pbtn ghost" data-ai-edit>${ic('grid',14)} Edit home</button>
+        <button class="pbtn deny" data-ai-remove>${ic('x',13)} Remove</button>
+        ${app.android ? `<button class="pbtn deny" data-ai-uninstall>${ic('trash',13)} Uninstall</button>` : ''}
+      </div></div>`;
+    scrim.classList.add('open');
+    scrim.onclick = e => { if (e.target === scrim) close(); };
+    scrim.querySelector('[data-ai-open]').onclick = () => { close(); launch(app.id); };
+    scrim.querySelector('[data-ai-perms]').onclick = () => { close(); go('permissions'); };
+    scrim.querySelector('[data-ai-edit]').onclick = () => { close(); enterHomeEditInPlace(); };
+    scrim.querySelector('[data-ai-remove]').onclick = () => {
+      close();
+      removeFromHome(app.id);
+      renderHome();
+      toast(`${esc(app.name)} removed from home`, '', 'x');
+    };
+    const aiu = scrim.querySelector('[data-ai-uninstall]');
+    if (aiu) aiu.onclick = async () => {
+      close();
+      const ok = await confirmModal(`Uninstall ${esc(app.name)}?`,
+        'Removes the app and its data from the Android layer.', 'Uninstall');
+      if (!ok) return;
+      toast('Uninstalling…', '', 'android');
+      const r = await Sov.androidRemove(app.pkg);
+      if (r && r.ok) { removeAndroidFromHome(app.pkg); renderHome(); toast(`${esc(app.name)} uninstalled`, 'ok', 'check'); }
+      else toast((r && r.error) || 'Could not uninstall', 'alert', 'x');
+    };
+  }
+  // The drawer's per-app menu (long-press or right-click an icon): open it,
+  // put it on / take it off the home screen, and — for Android apps, the only
+  // kind that CAN be uninstalled — uninstall. Built-ins say so instead.
+  function openAppMenu(id) {
+    const app = resolveHomeApp(id); if (!app) return;
+    const scrim = $('#promptScrim');
+    const close = () => {
+      scrim.onclick = null;
+      scrim.classList.remove('open');
+      setTimeout(() => { if (!scrim.classList.contains('open')) scrim.innerHTML = ''; }, 200);
+    };
+    const onHome = onHomeAlready(id);
+    scrim.innerHTML = `<div class="prompt-card app-info">
+      <div class="aic-head">
+        <span class="aic-ic" style="--col:${app.color}">${ic(app.glyph, 30)}</span>
+        <span class="aic-t"><span class="aic-name">${esc(app.name)}</span>
+        <span class="aic-sub">${esc(app.android ? 'Android · ' + app.pkg : (app.cat || 'App') + ' · built-in')}</span></span>
+      </div>
+      <div class="aic-actions">
+        <button class="pbtn allow" data-am-open>Open</button>
+        ${onHome
+          ? `<button class="pbtn ghost" data-am-unhome>${ic('x',13)} Remove from home</button>`
+          : `<button class="pbtn ghost" data-am-home>${ic('home',14)} Add to home</button>`}
+        ${app.android
+          ? `<button class="pbtn deny" data-am-uninstall>${ic('trash',13)} Uninstall</button>`
+          : `<button class="pbtn ghost" disabled title="Part of AuraOS">${ic('logo',13)} Built-in</button>`}
+      </div></div>`;
+    scrim.classList.add('open');
+    scrim.onclick = e => { if (e.target === scrim) close(); };
+    scrim.querySelector('[data-am-open]').onclick = () => { close(); launch(id); };
+    const ah = scrim.querySelector('[data-am-home]');
+    if (ah) ah.onclick = () => {
+      close();
+      addToHome(id);
+      toast(`${esc(app.name)} added to home`, 'ok', 'check');
+    };
+    const rh = scrim.querySelector('[data-am-unhome]');
+    if (rh) rh.onclick = () => {
+      close();
+      removeFromHome(id);
+      toast(`${esc(app.name)} removed from home`, '', 'x');
+    };
+    const un = scrim.querySelector('[data-am-uninstall]');
+    if (un) un.onclick = async () => {
+      close();
+      const ok = await confirmModal(`Uninstall ${esc(app.name)}?`,
+        'Removes the app and its data from the Android layer.', 'Uninstall');
+      if (!ok) return;
+      toast('Uninstalling…', '', 'android');
+      const r = await Sov.androidRemove(app.pkg);
+      if (r && r.ok) {
+        removeAndroidFromHome(app.pkg);
+        toast(`${esc(app.name)} uninstalled`, 'ok', 'check');
+        if (S.view === 'drawer') renderDrawer('');
+        else if (S.view === 'home') renderHome();
+      } else toast((r && r.error) || 'Could not uninstall', 'alert', 'x');
+    };
+  }
+  // Long-press (or right-click) → the app menu, on every drawer icon/row.
+  // A fired long-press marks the element so the click that follows the
+  // pointer-up doesn't ALSO launch the app.
+  function wireAppMenus(root) {
+    root.querySelectorAll('[data-launch]').forEach(el => {
+      let t = null, sx = 0, sy = 0;
+      const open = () => { el.dataset.lpDone = '1'; openAppMenu(el.dataset.launch); };
+      el.addEventListener('pointerdown', e => {
+        sx = e.clientX; sy = e.clientY;
+        clearTimeout(t); t = setTimeout(open, 450);
+      });
+      const cancel = () => clearTimeout(t);
+      el.addEventListener('pointermove', e => {
+        if (Math.hypot(e.clientX - sx, e.clientY - sy) > 8) cancel();
+      });
+      el.addEventListener('pointerup', cancel);
+      el.addEventListener('pointercancel', cancel);
+      el.addEventListener('contextmenu', e => { e.preventDefault(); open(); });
+    });
+  }
+
+  // Dismiss the info card mid-gesture (the peek hands off into a drag).
+  function closeAppInfo() {
+    const scrim = $('#promptScrim');
+    if (!scrim.querySelector('.app-info')) return;
+    scrim.onclick = null;
+    scrim.classList.remove('open');
+    setTimeout(() => { if (!scrim.classList.contains('open')) scrim.innerHTML = ''; }, 200);
   }
 
   const greetShort = t => {
@@ -1142,16 +1582,25 @@
           showHint(overGrid, dropSlot);
         };
         // In edit mode a small move starts the drag immediately. Not yet in
-        // edit mode, a long-press enters it AND begins the drag on the exact
-        // same pointer session — no lifting and pressing again to continue.
+        // edit mode, a long-press PEEKS the app-info card (identity, access,
+        // actions). The pointer stays captured, so sliding on past the
+        // threshold dismisses the peek and hands into edit + drag — the same
+        // continuous long-press-into-drag gesture as before.
+        let infoShown = false;
         let lp = S.homeEdit ? null : setTimeout(() => {
           if (moved) return;   // already turned into a page-swipe
-          enterHomeEditInPlace();
-          beginDrag();
+          infoShown = true;
+          try { tile.setPointerCapture(e.pointerId); } catch (_) {}
+          const app = resolveHomeApp(tile.dataset.launch);
+          if (app) openAppInfo(app);
         }, 480);
         const onMove = ev => {
           if (!moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) > 9) {
             moved = true; clearTimeout(lp);
+            if (infoShown) {   // slid out of the peek → rearrange instead
+              infoShown = false; closeAppInfo();
+              enterHomeEditInPlace();
+            }
             if (S.homeEdit && !started) beginDrag();
           }
           if (!started) return;
@@ -1163,7 +1612,12 @@
           tile.removeEventListener('pointermove', onMove);
           window.removeEventListener('pointerup', up);
           if (raf) { cancelAnimationFrame(raf); raf = null; }
-          if (!started) return;
+          if (!started) {
+            // released on the peek: the card stays up; swallow the click that
+            // follows so the release doesn't also launch the app underneath
+            if (infoShown) { suppressClick = true; setTimeout(() => { suppressClick = false; }, 80); }
+            return;
+          }
           if (hint) hint.remove();
           // Commit the tile to the target slot. If that cell is taken, the
           // sitting tile swaps back into the source slot — a clean exchange
@@ -1745,6 +2199,7 @@
     if (filter) { input.focus(); input.setSelectionRange(filter.length, filter.length); }
     else if (S.focusSearch) { S.focusSearch = false; input.focus(); }
     bindLaunchers($('#v-drawer'));
+    wireAppMenus($('#drawerScroll'));   // long-press an icon → add-to-home / uninstall menu
     $('#drawerScroll').querySelectorAll('[data-deep]').forEach(b => b.onclick = () => {
       const [gi, i] = b.dataset.deep.split(':').map(Number); deep[gi].entries[i].run();
     });
@@ -2163,9 +2618,47 @@
   /* ---- shared helpers for settings / system screens --------------------- */
   const stillOn = id => S.view === id;
   const clearScreenTimer = () => { if (S.screenTimer) { clearInterval(S.screenTimer); S.screenTimer = null; } };
+  // Which screens have a floating mini version (a live brick) to pop out into.
+  const WM_FLOAT = { terminal: 'terminal', notes: 'notes', files: 'files', 'sys-monitor': 'sysmon' };
+  // Desktop-style window controls, on the window itself (not buried in
+  // settings): every screen is a maximized window, so it gets minimize (–,
+  // drop to home) and — when a floating mini version exists — restore-down
+  // (❐, pop out as a live brick over home). Wired once, by delegation.
+  const wmCtrlsHTML = brick => `<div class="wm-ctrls">
+      ${brick ? `<button class="wm-btn" data-wfloat="${brick}" aria-label="Float on home" title="Float on home">${ic('restore', 13)}</button>` : ''}
+      <button class="wm-btn" data-wmin aria-label="Minimize to home" title="Minimize">${ic('minus', 14)}</button></div>`;
   const shead = (eyebrow, title, lead = '') =>
-    `<div class="screen-head"><div class="eyebrow">${eyebrow}</div><div class="h1">${title}</div>` +
+    `<div class="screen-head">${wmCtrlsHTML(WM_FLOAT[S.view])}<div class="eyebrow">${eyebrow}</div><div class="h1">${title}</div>` +
     (lead ? `<div class="screen-lead">${lead}</div>` : '') + `</div>`;
+  function floatToBrick(id) {
+    const d = lwDef(id); if (!d) return;
+    // An app view's DOM may exist exactly once: floating an app that owns the
+    // frame TAKES OVER from it — tear the frame down (its close handler runs),
+    // then the window mounts the same view fresh over home.
+    const aid = id.startsWith('app:') ? id.slice(4) : id;
+    if (_frameApp === aid) {
+      S.appOpen = null;
+      teardownFrameDom();
+      $('#appframe').classList.remove('open', 'shown', 'closing');
+    }
+    lwSet(id, { on: true, min: false, z: lwMaxZ() + 1 });
+    goHome();   // the window lives over home; land where it shows
+    toast(`${d.name} is floating on home — its × closes it`, '', d.icon);
+  }
+  document.addEventListener('click', e => {
+    const f = e.target.closest('[data-wfloat]');
+    if (f) { e.stopPropagation(); floatToBrick(f.dataset.wfloat); return; }
+    if (e.target.closest('[data-wmin]')) { e.stopPropagation(); goHome(); }
+  });
+  // Page capacity follows the viewport: a rotation/resize changes how many
+  // rows fit, so home re-lays itself (the overflow pass reflows the pages).
+  let _homeResizeT = null;
+  window.addEventListener('resize', () => {
+    clearTimeout(_homeResizeT);
+    _homeResizeT = setTimeout(() => {
+      if (S.view === 'home' && !S.appOpen && !S.homeEdit && !S.locked) renderHome();
+    }, 250);
+  });
   const srow = (icn, title, sub, nav, danger) =>
     `<button class="row tappable" style="width:100%;text-align:left" ${nav ? `data-nav="${nav}"` : ''}>
       <span class="glyph"${danger ? ' style="color:var(--alert)"' : ''}>${ic(icn, 20)}</span>
@@ -2969,9 +3462,18 @@
   }
   function termLiveRowHTML(inputClass) {
     return S.termBusy
-      ? `<div class="tl tl-busy">${esc(cwdShort(S.termCwd))} · running…</div>`
+      ? `<div class="tl tl-busy"><span>${esc(cwdShort(S.termCwd))} · running…</span>
+           <button class="term-stop" data-termstop title="Stop (Ctrl+C)">${ic('stop', 10)}<span>stop</span></button></div>`
       : `<div class="tl tl-live">${promptHTML(S.termCwd)}<input class="term-in ${inputClass}"
            autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></div>`;
+  }
+  // The busy row's stop button — a real Ctrl-C: the agent SIGINTs the whole
+  // process group; the pending exec then returns with partial output + ^C.
+  function wireTermStop(box, autofocus) {
+    const b = box.querySelector('[data-termstop]'); if (!b) return;
+    b.onclick = () => { b.disabled = true; Sov.execCancel(); };
+    b.onkeydown = e => { if (e.key === 'c' && e.ctrlKey) { e.preventDefault(); b.click(); } };
+    if (autofocus) b.focus();
   }
   // Runs one command against the real shared session; redraw() repaints
   // whichever window(s) should reflect it (the caller decides which).
@@ -2990,9 +3492,12 @@
     if (S.termLines.length > 300) S.termLines = S.termLines.slice(-300);
     redraw();
   }
-  // Wires history (↑/↓), Ctrl-L and Enter on a terminal input scoped to `box`
-  // (works for both the full-screen box and the home brick — no shared ids).
+  // Wires history (↑/↓), Tab completion, Ctrl-L/Ctrl-C and Enter on a terminal
+  // input scoped to `box` (the full-screen box and the home brick — no shared
+  // ids). A redraw replaces the input, so anything mid-typing survives via
+  // S.termDraft — the freshly created input picks it up here.
   function wireTermInput(box, inp, onRedraw) {
+    if (S.termDraft != null) { inp.value = S.termDraft; S.termDraft = null; inp.focus(); moveCaretEnd(inp); }
     box.onclick = () => inp.focus();
     box.onscroll = () => { if (box.scrollLeft !== 0) box.scrollLeft = 0; };   // keep the prompt flush-left
     inp.onkeydown = async e => {
@@ -3000,10 +3505,52 @@
       const h = S.termHist || (S.termHist = []);
       if (e.key === 'ArrowUp') { if (h.length) { S.termHistIdx = Math.max(0, (S.termHistIdx ?? h.length) - 1); inp.value = h[S.termHistIdx] || ''; moveCaretEnd(inp); } return; }
       if (e.key === 'ArrowDown') { S.termHistIdx = Math.min(h.length, (S.termHistIdx ?? h.length) + 1); inp.value = h[S.termHistIdx] || ''; return; }
+      if (e.key === 'Tab') { e.preventDefault(); await termComplete(inp, onRedraw); return; }
       if (e.key === 'l' && e.ctrlKey) { e.preventDefault(); S.termLines = []; onRedraw(); return; }
+      if (e.key === 'c' && e.ctrlKey && inp.selectionStart === inp.selectionEnd) {
+        // bash reflex: Ctrl-C with nothing selected abandons the line (^C in
+        // the scrollback, fresh prompt); with a selection it stays copy.
+        e.preventDefault();
+        S.termLines.push({ t: 'cmd', v: inp.value + '^C', cwd: S.termCwd });
+        onRedraw(); return;
+      }
       if (e.key !== 'Enter') return;
       await termRunCommand(inp.value, onRedraw);
     };
+  }
+  // Tab completion, bash-flavoured: first word → command names, later words →
+  // files and directories (dirs keep a trailing /). One match completes it, a
+  // common prefix extends to it, anything else prints the candidates — the
+  // double-Tab reflex, minus the double.
+  async function termComplete(inp, onRedraw) {
+    if (S.termBusy) return;
+    const caret = inp.selectionStart ?? inp.value.length;
+    const before = inp.value.slice(0, caret), after = inp.value.slice(caret);
+    const m = before.match(/(^|[\s;|&])([^\s;|&]*)$/);
+    const word = m ? m[2] : before;
+    if (!word) return;   // a bare Tab on nothing would dump 60 random commands
+    const head = before.slice(0, before.length - word.length);
+    const isFirst = !/\S/.test(head.split(/[;|&]/).pop());   // start of a (sub)command?
+    let list;
+    try { list = await Sov.complete(word, isFirst, S.termCwd); } catch (e) { return; }
+    if (!Array.isArray(list) || !list.length) return;
+    const set = new Set(list);
+    list = list.filter(x => !set.has(x + '/'));   // a dir shows once, with its slash
+    const bsl = s => s.replace(/(\s)/g, '\\$1');  // completed spaces arrive escaped
+    let pre = list[0];
+    for (const x of list) { let i = 0; while (i < pre.length && pre[i] === x[i]) i++; pre = pre.slice(0, i); }
+    if (list.length === 1) {
+      const full = bsl(list[0]) + (list[0].endsWith('/') ? '' : ' ');
+      inp.value = head + full + after;
+      inp.setSelectionRange((head + full).length, (head + full).length);
+    } else if (pre.length > word.length) {
+      inp.value = head + bsl(pre) + after;
+      inp.setSelectionRange((head + bsl(pre)).length, (head + bsl(pre)).length);
+    } else {
+      S.termDraft = inp.value;   // survive the redraw that prints the candidates
+      S.termLines.push({ t: 'sys', v: list.slice(0, 40).join('  ') + (list.length > 40 ? '  …' : '') });
+      onRedraw();
+    }
   }
   function moveCaretEnd(inp) { setTimeout(() => { const n = inp.value.length; try { inp.setSelectionRange(n, n); } catch (e) {} }, 0); }
 
@@ -3018,114 +3565,530 @@
       <div style="height:8px"></div>`;
     const box = $('#termBox');
     box.scrollTop = box.scrollHeight;
+    wireTermStop(box, true);   // busy: focus the stop button so Ctrl+C lands
     const inp = box.querySelector('.term-in');
     if (!inp) return;
     wireTermInput(box, inp, () => { if (S.view === 'terminal') drawTerminal(); });
     setTimeout(() => { inp.focus(); box.scrollLeft = 0; box.scrollTop = box.scrollHeight; }, 30);
   }
 
-  /* ---- Live Terminal brick — a real, running terminal that floats over home,
-     always on top, draggable and resizable, independent of whatever else is
-     on screen (Phase A of "live tiles" — see DEVELOPMENT.md 3.4.2 for the
-     fuller windowing vision this is the first step toward). Off by default;
-     it shares the exact same session as the full-screen Terminal app above —
-     type in one, see it in the other, because it's the same shell process,
-     not a copy. Home-only for now: it hides while an app is open, another
-     screen is showing, or the device is locked, and reappears on return. */
-  const liveTermOn = () => PREF.get('liveTerm', false);
-  // Stored as fractions of the home content area so it holds its relative
-  // spot across viewport sizes/orientations, like the clock's own placement.
-  const LT_DEFAULT_RECT = { xf: 0.56, yf: 0.05, wf: 0.4, hf: 0.32 };
-  const ltRect = () => Object.assign({}, LT_DEFAULT_RECT, PREF.get('liveTermRect', null) || {});
-  function ltShouldShow() {
-    return liveTermOn() && !S.locked && S.view === 'home' && !S.appOpen && !S.recentsOpen;
+  /* ---- LIVE BRICKS — real, running mini-apps that float over home ---------
+     Phase B of "live tiles" (DEVELOPMENT.md 3.4.2): a small window manager.
+     Each brick is a desktop-style window — a title bar with minimize /
+     maximize·restore / close, draggable, resizable, always on top of home —
+     and each can be STUCK to a snap zone ("brick" of the screen): drag the
+     header and release over a zone (a ghost previews the landing, corner pads
+     fade in as drop hints), and the window fills that zone and holds it
+     across re-mounts and viewport changes. Drag its header again to pop free.
+     Click any window to raise it. Everything is real data or honest absence:
+       terminal — the SAME session as the Terminal app (one shell, two windows)
+       files    — a compact browser over the real filesystem
+       sysmon   — live CPU / memory / uptime, straight from /api/system
+       notes    — a persistent scratchpad, autosaved into the real Notes store
+       music    — a mini player over ~/Music; playback survives the window
+     A brick opens from its APP: every app window carries desktop-style
+     controls (see wmCtrlsHTML) and the ❐ one pops the app out as its floating
+     mini version — no settings page involved. The window's × closes it.
+     Home-only for now: bricks hide while an app is open, another screen is
+     showing, or the device is locked, and reappear on return. */
+  const LW_GAP = 8;                           // breathing room around a snapped window
+  const LW_PILL_W = 172, LW_PILL_H = 38;      // a minimized window's title pill
+  const LW_ORDER = ['terminal', 'files', 'sysmon', 'notes', 'music'];
+  const LW_DEFS = {
+    terminal: { name: 'Terminal',   icon: 'terminal', def: { xf: .56, yf: .05, wf: .40, hf: .32 },
+      extras: () => `<button class="lt-ctrl lt-font" data-lwfont="-1" aria-label="Smaller text">A−</button>
+                     <button class="lt-ctrl lt-font" data-lwfont="1" aria-label="Bigger text">A+</button>`,
+      mount: box => lwMountTerminal(box), onResize: () => redrawLiveTermBrick() },
+    files:    { name: 'Files',      icon: 'folder',   def: { xf: .04, yf: .34, wf: .46, hf: .36 },
+      mount: box => lwMountFiles(box) },
+    sysmon:   { name: 'Monitor',    icon: 'chart',    def: { xf: .52, yf: .42, wf: .44, hf: .30 },
+      mount: box => lwMountSysmon(box) },
+    notes:    { name: 'Scratchpad', icon: 'note',     def: { xf: .08, yf: .06, wf: .44, hf: .28 },
+      mount: box => lwMountNotes(box) },
+    music:    { name: 'Music',      icon: 'music',    def: { xf: .30, yf: .60, wf: .40, hf: .22 },
+      mount: box => lwMountMusic(box) },
+  };
+  /* Dynamic app windows — ANY app can float, not just the curated minis:
+     window id `app:<appId>` hosts the app's REAL view, the same render/wire
+     the full-screen frame uses (Android apps get the same placeholder card
+     the frame shows). One-instance rule: an app view's element ids are
+     document-global, so floating tears the frame down and opening the frame
+     un-floats — exactly one copy of an app's DOM ever exists. */
+  const _lwAppDefs = {};   // per-app def cache (stable identity across renders)
+  function lwDef(id) {
+    if (LW_DEFS[id]) return LW_DEFS[id];
+    if (!id || !id.startsWith('app:')) return null;
+    if (_lwAppDefs[id]) return _lwAppDefs[id];
+    const aid = id.slice(4);
+    const app = Sov.app(aid) || resolveHomeApp(aid);
+    if (!app) return null;   // uninstalled since — the sync pass scrubs it
+    return (_lwAppDefs[id] = {
+      name: app.name, icon: app.glyph || 'grid',
+      def: { xf: .15, yf: .08, wf: .70, hf: .58 },
+      mount: box => {
+        const view = APP_VIEWS[app.id];
+        box.innerHTML = `<div class="lw-appview">${view ? view.render(app) : placeholderView(app)}</div>`;
+        if (view && view.wire) { try { view.wire(app); } catch (e) {} }
+        return () => { if (view && view.close) { try { view.close(); } catch (e) {} } };
+      },
+    });
   }
-  // Mount/unmount only — never re-renders content on its own, so a live poll
-  // (onUpdate ticks every ~2s) can never steal focus out from under typing.
-  function syncLiveTermBrick() {
-    const el = $('#liveTerm');
-    if (!ltShouldShow()) { if (el.firstElementChild) el.innerHTML = ''; return; }
-    if (el.firstElementChild) return;   // already mounted — leave it alone
-    ensureTermSession();
-    const r = ltRect();
-    el.innerHTML = `
-      <div class="lt-win" id="ltWin" style="left:${(r.xf*100).toFixed(2)}%;top:${(r.yf*100).toFixed(2)}%;width:${(r.wf*100).toFixed(2)}%;height:${(r.hf*100).toFixed(2)}%">
-        <header class="lt-head" id="ltGrip">
+  // Every window that exists right now: the curated minis + any floated apps.
+  const lwIds = () => [...LW_ORDER, ...Object.keys(lwAll()).filter(k => k.startsWith('app:'))];
+  /* Per-window state, PREF 'liveWins': { id: { on, rect:{xf,yf,wf,hf}|null,
+     snap, min, z } }. Rects are FRACTIONS of the brick area so a window holds
+     its relative spot across viewport sizes/orientations. One-time migration
+     from the single-window era's liveTerm/liveTermRect/liveTermSnap keys. */
+  function lwAll() {
+    let w = PREF.get('liveWins', null);
+    if (!w || typeof w !== 'object') {
+      w = {};
+      if (PREF.get('liveTerm', false)) w.terminal = {
+        on: true, rect: PREF.get('liveTermRect', null),
+        snap: PREF.get('liveTermSnap', null), min: PREF.get('liveTermMin', false), z: 1 };
+    }
+    return w;
+  }
+  const lwGet = id => Object.assign({ on: false, rect: null, snap: null, min: false, z: 0 }, lwAll()[id] || {});
+  function lwSet(id, patch) {
+    const all = lwAll();
+    all[id] = Object.assign(lwGet(id), patch);
+    PREF.set('liveWins', all);
+  }
+  const lwMaxZ = () => Math.max(0, ...Object.values(lwAll()).map(w => w.z || 0));
+  // The snap zones — each a fractional rect of the brick area. Left/right/
+  // bottom halves, four quadrants, and full (maximize).
+  const LW_ZONES = {
+    full:  { xf: 0,  yf: 0,  wf: 1,  hf: 1  },
+    left:  { xf: 0,  yf: 0,  wf: .5, hf: 1  },
+    right: { xf: .5, yf: 0,  wf: .5, hf: 1  },
+    bottom:{ xf: 0,  yf: .5, wf: 1,  hf: .5 },
+    tl:    { xf: 0,  yf: 0,  wf: .5, hf: .5 },
+    tr:    { xf: .5, yf: 0,  wf: .5, hf: .5 },
+    bl:    { xf: 0,  yf: .5, wf: .5, hf: .5 },
+    br:    { xf: .5, yf: .5, wf: .5, hf: .5 },
+  };
+  const LW_ZONE_LABEL = { full: 'Maximize', left: 'Left', right: 'Right', bottom: 'Bottom',
+    tl: 'Top-left', tr: 'Top-right', bl: 'Bottom-left', br: 'Bottom-right' };
+  const LW_PADS = ['tl', 'tr', 'bl', 'br'];   // corner drop hints, fade in on drag
+  // Which zone a pointer at fractional (px,py) targets — a 3×3 feel: corners
+  // → quadrants, top-centre → maximize, side/bottom centres → half zones, and
+  // the dead centre → no snap (free float).
+  function lwZoneAt(px, py) {
+    const col = px < 1 / 3 ? 0 : px < 2 / 3 ? 1 : 2;
+    const row = py < 1 / 3 ? 0 : py < 2 / 3 ? 1 : 2;
+    return [['tl', 'full', 'tr'], ['left', null, 'right'], ['bl', 'bottom', 'br']][row][col];
+  }
+  const lwBounds = () => $('#liveWins').getBoundingClientRect();
+  function lwZoneRect(id, b) {
+    const z = LW_ZONES[id]; if (!z) return null;
+    return { left: z.xf * b.width + LW_GAP, top: z.yf * b.height + LW_GAP,
+      width: z.wf * b.width - LW_GAP * 2, height: z.hf * b.height - LW_GAP * 2 };
+  }
+  // A window's current pixel rect: its zone if stuck, else its free rect.
+  function lwWinRect(id, b) {
+    const w = lwGet(id);
+    if (w.snap && LW_ZONES[w.snap]) return lwZoneRect(w.snap, b);
+    const d = lwDef(id);
+    const r = Object.assign({}, (d ? d.def : { xf: .15, yf: .1, wf: .6, hf: .5 }), w.rect || {});
+    return { left: r.xf * b.width, top: r.yf * b.height, width: r.wf * b.width, height: r.hf * b.height };
+  }
+  function lwShouldShow() {
+    return !S.locked && S.view === 'home' && !S.appOpen && !S.recentsOpen
+      && Object.values(lwAll()).some(w => w.on);
+  }
+  let _lwDragging = false, _lwResizeBound = false;
+  const _lwCleanup = {};   // per-window unmount fns (timers etc.)
+  // Mount/unmount + placement only — never re-renders window content on its
+  // own, so a live poll (onUpdate ticks every ~2s) can never steal focus out
+  // from under typing or clobber a drag.
+  function syncLiveBricks() {
+    const el = $('#liveWins');
+    if (!lwShouldShow()) {
+      if (el.firstElementChild) {
+        Object.keys(_lwCleanup).forEach(id => { try { _lwCleanup[id](); } catch (e) {} delete _lwCleanup[id]; });
+        el.innerHTML = '';
+      }
+      return;
+    }
+    if (!el.firstElementChild) el.innerHTML = `
+      <div class="lt-pads" aria-hidden="true">${
+        LW_PADS.map(id => `<div class="lt-pad lt-pad--${id}" data-pad="${id}"><span></span></div>`).join('')}</div>
+      <div class="lt-ghost" aria-hidden="true"><span class="lt-ghost-label"></span></div>`;
+    lwIds().forEach(id => {
+      const has = el.querySelector(`.lt-win[data-lw="${id}"]`);
+      if (!lwDef(id)) {   // a floated app that no longer exists — scrub it
+        if (has) lwRemoveWin(id);
+        if (lwGet(id).on) lwSet(id, { on: false });
+        return;
+      }
+      if (lwGet(id).on && !has) lwMountWin(id);
+      else if (!lwGet(id).on && has) lwRemoveWin(id);
+    });
+    if (!_lwDragging) lwPositionAll();
+    if (!_lwResizeBound) {   // keep zones correct when the viewport changes
+      _lwResizeBound = true;
+      window.addEventListener('resize', () => { if ($('#liveWins .lt-win') && !_lwDragging) lwPositionAll(); });
+    }
+  }
+  function lwMountWin(id) {
+    const d = lwDef(id); if (!d) return;
+    $('#liveWins').insertAdjacentHTML('beforeend', `
+      <div class="lt-win" data-lw="${id}">
+        <header class="lt-head" data-lwgrip>
           <span class="lt-dot" aria-hidden="true"></span>
-          <span class="lt-title">${ic('terminal',13)}<span>Terminal</span></span>
-          <button class="lt-x" id="ltClose" aria-label="Turn off Live Terminal">${ic('x',12)}</button>
+          <span class="lt-title">${ic(d.icon, 13)}<span>${d.name}</span></span>
+          <div class="lt-ctrls">
+            ${d.extras ? d.extras() : ''}
+            <button class="lt-ctrl" data-lwbtn="min" aria-label="Minimize">${ic('minus', 13)}</button>
+            <button class="lt-ctrl" data-lwbtn="max" aria-label="Maximize">${ic('maximize', 12)}</button>
+            <button class="lt-ctrl lt-x" data-lwbtn="close" aria-label="Close ${d.name}">${ic('x', 13)}</button>
+          </div>
         </header>
-        <div class="term lt-term" id="ltBox">${termLinesHTML()}${termLiveRowHTML('lt-in')}</div>
-        <div class="lt-resize" id="ltResize" aria-hidden="true">${ic('chev',11)}</div>
-      </div>`;
-    wireLiveTermBrick();
+        <div class="lt-body" data-lwbody></div>
+        <div class="lt-resize" data-lwresize aria-hidden="true">${ic('chev', 11)}</div>
+      </div>`);
+    const win = $(`#liveWins .lt-win[data-lw="${id}"]`);
+    // place before first paint, without the glide transition (a fresh element
+    // would otherwise animate in from the corner); the entrance is ltIn
+    win.classList.add('lt-moving');
+    lwPositionWin(id, win);
+    requestAnimationFrame(() => win.classList.remove('lt-moving'));
+    const cleanup = d.mount(win.querySelector('[data-lwbody]'));
+    if (typeof cleanup === 'function') _lwCleanup[id] = cleanup;
+    lwWireWin(id, win);
   }
-  function redrawLiveTermBrick() {
-    const box = $('#ltBox'); if (!box) return;
-    box.innerHTML = termLinesHTML() + termLiveRowHTML('lt-in');
-    box.scrollTop = box.scrollHeight;
-    const inp = box.querySelector('.term-in');
-    if (inp) { wireTermInput(box, inp, redrawLiveTermBrick); inp.focus(); }
+  function lwRemoveWin(id) {
+    if (_lwCleanup[id]) { try { _lwCleanup[id](); } catch (e) {} delete _lwCleanup[id]; }
+    const win = $(`#liveWins .lt-win[data-lw="${id}"]`);
+    if (win) win.remove();
   }
-  function wireLiveTermBrick() {
-    const win = $('#ltWin'), box = $('#ltBox'), inp = box.querySelector('.term-in');
-    box.scrollTop = box.scrollHeight;
-    if (inp) wireTermInput(box, inp, redrawLiveTermBrick);
-    $('#ltClose').onclick = e => {
+  function lwPositionAll() {
+    $$('#liveWins .lt-win').forEach(w => lwPositionWin(w.dataset.lw, w));
+  }
+  // Lay one window out from its stored placement (zone, free, or minimized)
+  // and sync its chrome (max/restore glyph, docked frame). No content redraw —
+  // safe to call anytime without disturbing what the user is typing.
+  function lwPositionWin(id, win) {
+    win = win || $(`#liveWins .lt-win[data-lw="${id}"]`); if (!win) return;
+    const w = lwGet(id), b = lwBounds();
+    win.classList.toggle('lt-mini', w.min);
+    win.classList.toggle('lt-stuck', !!w.snap && !w.min);
+    if (w.snap && !w.min) win.dataset.snap = w.snap; else delete win.dataset.snap;
+    win.style.zIndex = 10 + (w.z || 0);
+    if (w.min) {
+      // minimized windows park as title pills along the bottom edge, in order
+      const slot = lwIds().filter(x => lwGet(x).on && lwGet(x).min && $(`#liveWins .lt-win[data-lw="${x}"]`)).indexOf(id);
+      win.style.left = (LW_GAP + Math.max(0, slot) * (LW_PILL_W + 8)) + 'px';
+      win.style.top = Math.max(0, b.height - LW_PILL_H - LW_GAP) + 'px';
+      win.style.width = LW_PILL_W + 'px'; win.style.height = LW_PILL_H + 'px';
+    } else {
+      const r = lwWinRect(id, b);
+      win.style.left = r.left + 'px'; win.style.top = r.top + 'px';
+      win.style.width = r.width + 'px'; win.style.height = r.height + 'px';
+    }
+    const maxb = win.querySelector('[data-lwbtn="max"]');
+    if (maxb) { maxb.innerHTML = ic(w.snap === 'full' ? 'restore' : 'maximize', 12);
+      maxb.setAttribute('aria-label', w.snap === 'full' ? 'Restore' : 'Maximize'); }
+  }
+  // Raise on interaction — the tapped window wins the stack.
+  function lwRaise(id, win) {
+    if (lwGet(id).z !== lwMaxZ() || lwGet(id).z === 0) {
+      lwSet(id, { z: lwMaxZ() + 1 });
+      win.style.zIndex = 10 + lwGet(id).z;
+    }
+  }
+  function lwPlace(id, snap) {
+    lwSet(id, { snap: snap || null, min: false });
+    lwPositionAll();   // un-minimizing reflows the pill row too
+  }
+  function lwWireWin(id, win) {
+    const overlay = $('#liveWins'), ghost = overlay.querySelector('.lt-ghost');
+    const d = lwDef(id);
+    win.addEventListener('pointerdown', () => lwRaise(id, win));
+    win.querySelector('[data-lwbtn="close"]').onclick = e => {
       e.stopPropagation();
-      PREF.set('liveTerm', false);
-      syncLiveTermBrick();
-      toast('Live Terminal off — turn it back on in Personalize', '', 'terminal');
+      lwSet(id, { on: false });
+      lwRemoveWin(id);
+      toast(`${d.name} closed — float it again from the app's title bar`, '', d.icon);
     };
-    const bounds = () => $('#liveTerm').getBoundingClientRect();
-    // drag by the header
-    let dx = 0, dy = 0, startL = 0, startT = 0;
+    win.querySelector('[data-lwbtn="min"]').onclick = e => {
+      e.stopPropagation();
+      lwSet(id, { min: !lwGet(id).min });
+      lwPositionAll();
+    };
+    win.querySelector('[data-lwbtn="max"]').onclick = e => {
+      e.stopPropagation();
+      lwPlace(id, lwGet(id).snap === 'full' ? null : 'full');
+    };
+    // terminal's font-size steppers (the only per-brick extra so far)
+    win.querySelectorAll('[data-lwfont]').forEach(bn => bn.onclick = e => {
+      e.stopPropagation();
+      const px = Math.max(9, Math.min(16, ltFontPx() + +bn.dataset.lwfont));
+      PREF.set('ltFontPx', px);
+      const t = win.querySelector('.lt-term'); if (t) t.style.fontSize = px + 'px';
+    });
+
+    // ---- drag the header: move freely, preview/commit a snap zone ----
+    const grip = win.querySelector('[data-lwgrip]');
+    let dx = 0, dy = 0, startL = 0, startT = 0, zone = null;
+    const showGhost = (z, b) => {
+      overlay.querySelectorAll('.lt-pad').forEach(p => p.classList.toggle('on', p.dataset.pad === z));
+      if (!z) { ghost.classList.remove('on'); return; }
+      const r = lwZoneRect(z, b);
+      ghost.style.left = r.left + 'px'; ghost.style.top = r.top + 'px';
+      ghost.style.width = r.width + 'px'; ghost.style.height = r.height + 'px';
+      ghost.querySelector('.lt-ghost-label').textContent = LW_ZONE_LABEL[z] || '';
+      ghost.classList.add('on');
+    };
     const dragMove = e => {
-      const b = bounds();
+      const b = lwBounds();
       const nl = Math.max(0, Math.min(b.width - win.offsetWidth, startL + (e.clientX - dx)));
       const nt = Math.max(0, Math.min(b.height - win.offsetHeight, startT + (e.clientY - dy)));
       win.style.left = nl + 'px'; win.style.top = nt + 'px';
+      zone = lwZoneAt((e.clientX - b.left) / b.width, (e.clientY - b.top) / b.height);
+      showGhost(zone, b);
     };
-    $('#ltGrip').onpointerdown = e => {
-      if (e.target.closest('#ltClose')) return;
+    grip.onpointerdown = e => {
+      if (e.target.closest('.lt-ctrl')) return;
       e.preventDefault();
-      const b = bounds();
+      if (lwGet(id).min) { lwSet(id, { min: false }); lwPositionAll(); return; }   // tap the pill → restore
+      const b = lwBounds();
+      _lwDragging = true; zone = null;
+      win.classList.add('lt-moving'); overlay.classList.add('dragging');
+      // popping a stuck window off its zone: become a free window of the last
+      // free size, centred under the grab, then drag from there. (Geometry set
+      // directly — NOT via lwPositionWin, which would snap it back to the
+      // stored free rect instead of the grab point.)
+      if (lwGet(id).snap) {
+        const fr = Object.assign({}, d.def, lwGet(id).rect || {});
+        const w = Math.min(b.width * .92, fr.wf * b.width), h = Math.min(b.height * .92, fr.hf * b.height);
+        lwSet(id, { snap: null });
+        win.classList.remove('lt-stuck'); delete win.dataset.snap;
+        win.querySelector('[data-lwbtn="max"]').innerHTML = ic('maximize', 12);
+        win.style.width = w + 'px'; win.style.height = h + 'px';
+        win.style.left = Math.max(0, Math.min(b.width - w, e.clientX - b.left - w / 2)) + 'px';
+        win.style.top  = Math.max(0, Math.min(b.height - h, e.clientY - b.top - 18)) + 'px';
+      }
       dx = e.clientX; dy = e.clientY; startL = win.offsetLeft; startT = win.offsetTop;
       win.setPointerCapture(e.pointerId);
       const up = () => {
         win.removeEventListener('pointermove', dragMove);
-        win.removeEventListener('pointerup', up);
-        const bb = bounds();
-        PREF.set('liveTermRect', Object.assign(ltRect(), {
-          xf: win.offsetLeft / bb.width, yf: win.offsetTop / bb.height }));
+        _lwDragging = false;
+        win.classList.remove('lt-moving'); overlay.classList.remove('dragging');
+        ghost.classList.remove('on');
+        overlay.querySelectorAll('.lt-pad').forEach(p => p.classList.remove('on'));
+        const b2 = lwBounds();
+        if (zone) lwSet(id, { snap: zone });
+        else lwSet(id, { snap: null, rect: {
+          xf: win.offsetLeft / b2.width, yf: win.offsetTop / b2.height,
+          wf: win.offsetWidth / b2.width, hf: win.offsetHeight / b2.height } });
+        lwPositionWin(id, win);
       };
       win.addEventListener('pointermove', dragMove);
       win.addEventListener('pointerup', up, { once: true });
     };
-    // resize from the bottom-right corner handle
+    grip.ondblclick = e => {   // desktop reflex: double-click title = (un)maximize
+      if (e.target.closest('.lt-ctrl')) return;
+      lwPlace(id, lwGet(id).snap === 'full' ? null : 'full');
+    };
+
+    // ---- resize from the corner: a stuck window pops free at its current size ----
+    const rz = win.querySelector('[data-lwresize]');
     let rw = 0, rh = 0, sx = 0, sy = 0;
     const resizeMove = e => {
-      const b = bounds();
+      const b = lwBounds();
       const nw = Math.max(160, Math.min(b.width - win.offsetLeft, rw + (e.clientX - sx)));
-      const nh = Math.max(140, Math.min(b.height - win.offsetTop, rh + (e.clientY - sy)));
+      const nh = Math.max(120, Math.min(b.height - win.offsetTop, rh + (e.clientY - sy)));
       win.style.width = nw + 'px'; win.style.height = nh + 'px';
     };
-    $('#ltResize').onpointerdown = e => {
+    rz.onpointerdown = e => {
       e.preventDefault(); e.stopPropagation();
-      const b = bounds();
+      if (lwGet(id).min) return;
+      if (lwGet(id).snap) { lwSet(id, { snap: null }); win.classList.remove('lt-stuck'); delete win.dataset.snap; }
+      _lwDragging = true; win.classList.add('lt-moving');
       sx = e.clientX; sy = e.clientY; rw = win.offsetWidth; rh = win.offsetHeight;
       win.setPointerCapture(e.pointerId);
       const up = () => {
         win.removeEventListener('pointermove', resizeMove);
-        win.removeEventListener('pointerup', up);
-        const bb = bounds();
-        PREF.set('liveTermRect', Object.assign(ltRect(), {
-          wf: win.offsetWidth / bb.width, hf: win.offsetHeight / bb.height }));
-        redrawLiveTermBrick();   // the box may now show more/less scrollback
+        _lwDragging = false; win.classList.remove('lt-moving');
+        const bb = lwBounds();
+        lwSet(id, { rect: {
+          xf: win.offsetLeft / bb.width, yf: win.offsetTop / bb.height,
+          wf: win.offsetWidth / bb.width, hf: win.offsetHeight / bb.height } });
+        lwPositionWin(id, win);
+        if (d.onResize) d.onResize();   // e.g. terminal re-fits its scrollback
       };
       win.addEventListener('pointermove', resizeMove);
       win.addEventListener('pointerup', up, { once: true });
     };
+  }
+
+  /* ---- brick: Terminal — the same running session as the Terminal app ---- */
+  const ltFontPx = () => Math.max(9, Math.min(16, +PREF.get('ltFontPx', 11.5) || 11.5));
+  function lwMountTerminal(box) {
+    ensureTermSession();
+    box.innerHTML = `<div class="term lt-term" style="font-size:${ltFontPx()}px">${termLinesHTML()}${termLiveRowHTML('lt-in')}</div>`;
+    const t = box.firstElementChild;
+    t.scrollTop = t.scrollHeight;
+    wireTermStop(t, false);
+    const inp = t.querySelector('.term-in');
+    if (inp) wireTermInput(t, inp, redrawLiveTermBrick);
+  }
+  function redrawLiveTermBrick() {
+    const t = document.querySelector('#liveWins .lt-win[data-lw="terminal"] .lt-term'); if (!t) return;
+    t.innerHTML = termLinesHTML() + termLiveRowHTML('lt-in');
+    t.scrollTop = t.scrollHeight;
+    wireTermStop(t, false);   // tap to stop; no focus steal from a brick
+    const inp = t.querySelector('.term-in');
+    if (inp) { wireTermInput(t, inp, redrawLiveTermBrick); if (!lwGet('terminal').min) inp.focus(); }
+  }
+
+  /* ---- brick: Monitor — live CPU / memory / uptime, honest and system-wide ---- */
+  function lwMountSysmon(box) {
+    const paint = async () => {
+      let s; try { s = await Sov.system(); } catch (e) { return; }
+      if (!box.isConnected) return;
+      const cpu = Math.min(100, Math.round(s.load[0] / (s.cores || 1) * 100));
+      const memPct = Math.round(s.mem.used / s.mem.total * 100);
+      const up = (sec => { const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60);
+        return h >= 24 ? Math.floor(h / 24) + 'd ' + (h % 24) + 'h' : h + 'h ' + m + 'm'; })(s.uptime || 0);
+      const cls = p => p >= 90 ? 'crit' : p >= 75 ? 'warn' : '';
+      const stat = (lbl, val, pct) => `
+        <div class="ins-stat"><div class="st-top"><span>${lbl}</span><b>${val}</b></div>
+          <div class="ins-bar ${cls(pct)}"><span style="width:${Math.max(2, pct)}%"></span></div></div>`;
+      box.innerHTML = `<div class="lw-sys">
+        ${stat('CPU', cpu + '%', cpu)}
+        ${stat('Memory', (s.mem.used / 1024).toFixed(1) + ' / ' + (s.mem.total / 1024).toFixed(0) + ' GB', memPct)}
+        <div class="lw-sys-up"><span>Uptime</span><b>${up}</b></div></div>`;
+    };
+    paint();
+    const t = setInterval(paint, 3000);
+    return () => clearInterval(t);
+  }
+
+  /* ---- brick: Files — a compact browser over the real filesystem. Its own
+     cwd (independent of the Files app); folders navigate in place, tapping a
+     file hands over to the full Files app at that folder. ---- */
+  let _lwFmPath = '';
+  function lwMountFiles(box) {
+    box.innerHTML = `<div class="lw-fm">
+      <div class="lw-fm-bar">
+        <button class="lt-ctrl" data-fmup aria-label="Up one folder">${ic('up', 13)}</button>
+        <span class="lw-fm-path mono"></span></div>
+      <div class="lw-fm-list"><div class="lw-empty">Reading…</div></div></div>`;
+    const draw = async () => {
+      let d; try { d = await Sov.files.list(_lwFmPath || '', false); } catch (e) { return; }
+      if (!box.isConnected) return;
+      _lwFmPath = d.path;
+      box.querySelector('.lw-fm-path').textContent =
+        d.path === (d.home || '/home/aura') ? '~' : (d.path.split('/').pop() || '/');
+      const list = box.querySelector('.lw-fm-list');
+      list.innerHTML = d.error ? `<div class="lw-empty">${esc(d.error)}</div>`
+        : d.entries.length ? d.entries.map(en => {
+            const k = fileKind(en.name, en.dir);
+            return `<button class="lw-fm-row" data-n="${esc(en.name)}" ${en.dir ? 'data-d="1"' : ''}>
+              <span class="lw-fm-ic" style="color:${k.col}">${ic(k.ic, 14)}</span>
+              <span class="lw-fm-n">${esc(en.name)}</span>
+              ${en.dir ? `<span class="lw-fm-chev">${ic('chev', 12)}</span>` : ''}</button>`;
+          }).join('')
+        : `<div class="lw-empty">This folder is empty.</div>`;
+      const up = box.querySelector('[data-fmup]');
+      up.disabled = d.path === '/';
+      up.onclick = () => { _lwFmPath = d.parent || '/'; draw(); };
+      list.querySelectorAll('.lw-fm-row').forEach(b => b.onclick = () => {
+        if (b.dataset.d) { _lwFmPath = fmJoin(d.path, b.dataset.n); draw(); }
+        else { S.fmPath = d.path; go('files'); }   // a file → the full app, right here
+      });
+    };
+    draw();
+  }
+
+  /* ---- brick: Scratchpad — one persistent quick note, saved into Notes ---- */
+  function lwMountNotes(box) {
+    box.innerHTML = `<div class="lw-note-wrap">
+      <textarea class="lw-note" placeholder="Jot something — it autosaves into Notes."></textarea>
+      <span class="lw-note-saved"></span></div>`;
+    const ta = box.querySelector('.lw-note');
+    ta.onkeydown = e => e.stopPropagation();   // don't let global keys hijack typing
+    let noteId = PREF.get('brickNoteId', '');
+    (async () => {
+      if (!noteId) return;
+      try { const n = await Sov.notes.get(noteId); if (n && ta.isConnected && !ta.value) ta.value = n.text || ''; }
+      catch (e) { noteId = ''; }
+    })();
+    let t = null, dirty = false;
+    const save = async () => {
+      dirty = false;
+      try {
+        const r = await Sov.notes.save(noteId, ta.value);
+        if (r && r.id) { noteId = r.id; PREF.set('brickNoteId', noteId); }
+        const s = box.querySelector('.lw-note-saved');
+        if (s) { s.textContent = 'Saved'; setTimeout(() => { if (s.isConnected) s.textContent = ''; }, 1200); }
+      } catch (e) {}
+    };
+    ta.oninput = () => { dirty = true; clearTimeout(t); t = setTimeout(save, 600); };
+    // unmount FLUSHES a pending save — closing the window mid-sentence must
+    // never eat the last keystrokes
+    return () => { clearTimeout(t); if (dirty) save(); }
+  }
+
+  /* ---- brick: Music — a mini player over ~/Music. The audio element lives
+     OUTSIDE the window (module-level), so a track keeps playing when the
+     window unmounts (opening an app, locking) — the window is just a face on
+     it. Real files or an honest empty state; the full Music app and this
+     player pause each other so two songs never fight. ---- */
+  let _lwAudio = null, _lwMu = { tracks: null, i: 0 };
+  function lwMountMusic(box) {
+    box.innerHTML = `<div class="lw-empty">Reading ~/Music…</div>`;
+    (async () => {
+      if (!_lwMu.tracks) { try { _lwMu.tracks = ((await Sov.music()) || {}).items || []; } catch (e) { _lwMu.tracks = []; } }
+      if (!box.isConnected) return;
+      const tracks = _lwMu.tracks;
+      if (!tracks.length) { box.innerHTML = `<div class="lw-empty">No music yet — add files to ~/Music.</div>`; return; }
+      box.innerHTML = `<div class="lw-mu">
+        <div class="lw-mu-t" data-mu-title></div>
+        <div class="lw-mu-seek" data-mu-seek><span data-mu-fill></span></div>
+        <div class="lw-mu-ctrls">
+          <button class="lt-ctrl" data-mu="prev" aria-label="Previous">${ic('back', 16)}</button>
+          <button class="lt-ctrl lw-mu-play" data-mu="play" aria-label="Play / pause">${ic('play', 18)}</button>
+          <button class="lt-ctrl" data-mu="next" aria-label="Next" style="transform:scaleX(-1)">${ic('back', 16)}</button>
+        </div></div>`;
+      const q = sel => box.querySelector(sel);
+      const audio = _lwAudio || (_lwAudio = new Audio());
+      const paint = () => {
+        const tt = q('[data-mu-title]'); if (!tt) return;
+        tt.textContent = tracks[_lwMu.i] ? tracks[_lwMu.i].name : '';
+        const pb = q('[data-mu="play"]'); if (pb) pb.innerHTML = ic(audio.src && !audio.paused ? 'stop' : 'play', 18);
+        const f = q('[data-mu-fill]');
+        if (f) f.style.width = (audio.duration ? audio.currentTime / audio.duration * 100 : 0) + '%';
+      };
+      const load = (ix, play) => {
+        _lwMu.i = ((ix % tracks.length) + tracks.length) % tracks.length;
+        audio.src = Sov.audioUrl(tracks[_lwMu.i].rel);
+        if (play) { if (_audio) { try { _audio.pause(); } catch (e) {} } audio.play().catch(() => {}); }
+        paint();
+      };
+      // assigned (not addEventListener) so a remount replaces, never stacks;
+      // handlers guard on the window being mounted, so playback continuing
+      // while unmounted is safe and silent
+      audio.ontimeupdate = paint;
+      audio.onplay = paint; audio.onpause = paint;
+      audio.onended = () => load(_lwMu.i + 1, true);
+      q('[data-mu="play"]').onclick = () => {
+        if (!audio.src) return load(_lwMu.i, true);
+        if (audio.paused) { if (_audio) { try { _audio.pause(); } catch (e) {} } audio.play().catch(() => {}); }
+        else audio.pause();
+      };
+      q('[data-mu="prev"]').onclick = () => load(_lwMu.i - 1, true);
+      q('[data-mu="next"]').onclick = () => load(_lwMu.i + 1, true);
+      q('[data-mu-seek]').onclick = e => {
+        if (!audio.duration) return;
+        const b = e.currentTarget.getBoundingClientRect();
+        audio.currentTime = (e.clientX - b.left) / b.width * audio.duration;
+      };
+      paint();
+    })();
   }
 
   /* ======================================================================
@@ -4163,16 +5126,6 @@
           <span class="rtext"><div class="rtitle">Up next</div><div class="rsub">Your next calendar event on home — hidden when nothing is scheduled</div></span>
           <span class="switch ${PREF.get('upnext', true) ? 'on' : ''}"></span></button>
       </div>
-      <div class="section-head"><span class="eyebrow">Live Terminal</span>
-        <span class="muted" style="font-size:11px">a real, running shell — drag it, resize it</span></div>
-      <div class="card">
-        <button class="row tappable" data-livetermtgl style="width:100%;text-align:left"><span class="glyph">${ic('terminal',18)}</span>
-          <span class="rtext"><div class="rtitle">Floating terminal</div>
-            <div class="rsub">Always-on-top on home — the same session as the Terminal app, just a second window onto it</div></span>
-          <span class="switch ${liveTermOn() ? 'on' : ''}"></span></button>
-        ${PREF.get('liveTermRect', null) ? `<button class="row tappable" data-livetermreset style="width:100%;text-align:left"><span class="glyph">${ic('restart',18)}</span>
-          <span class="rtext"><div class="rtitle">Reset position &amp; size</div><div class="rsub">Put it back where it started</div></span></button>` : ''}
-      </div>
       <div style="height:8px"></div>`;
     $('#screenScroll').querySelectorAll('[data-clk]').forEach(b => b.onclick = () => {
       PREF.set('clockStyle', b.dataset.clk); renderPzClock(); toast('Clock style set', 'ok', 'check');
@@ -4192,16 +5145,6 @@
     };
     const unx = $('#screenScroll').querySelector('[data-upnexttgl]');
     if (unx) unx.onclick = () => { PREF.set('upnext', !PREF.get('upnext', true)); renderPzClock(); };
-    const ltt = $('#screenScroll').querySelector('[data-livetermtgl]');
-    if (ltt) ltt.onclick = () => {
-      PREF.set('liveTerm', !liveTermOn());
-      if (S.view === 'home') syncLiveTermBrick();
-      renderPzClock();
-    };
-    const ltr = $('#screenScroll').querySelector('[data-livetermreset]');
-    if (ltr) ltr.onclick = () => {
-      PREF.set('liveTermRect', null); renderPzClock(); toast('Terminal position reset', 'ok', 'check');
-    };
   }
 
   // ---- Personalize › Icons ---------------------------------------------------
@@ -4603,7 +5546,7 @@
     // On home the pane + helm sit on the wallpaper, so (in the light menu
     // theme) they keep the night look there — this class is the hook.
     $('#device').classList.toggle('on-wallpaper', view === 'home');
-    if (view !== 'home') syncLiveTermBrick();   // home's own render already synced it
+    if (view !== 'home') syncLiveBricks();   // home's own render already synced it
     $('#screenScroll').parentElement.scrollTop = 0;
     // directional motion: forward pushes slide in from the right, back from the left
     const stage = $('#stage');
@@ -4654,7 +5597,11 @@
      ====================================================================== */
   function bindLaunchers(root) {
     root.querySelectorAll('[data-launch]').forEach(b =>
-      b.onclick = () => launch(b.dataset.launch));
+      b.onclick = () => {
+        // a long-press that opened the app menu already consumed this gesture
+        if (b.dataset.lpDone) { delete b.dataset.lpDone; return; }
+        launch(b.dataset.launch);
+      });
     bindNav(root);
   }
 
@@ -4779,6 +5726,10 @@
   }
   function openAppFrame(app) {
     const af = $('#appframe');
+    // One instance per app: if this app is floating as a window, the frame
+    // takes over — close the window (its cleanup runs) and open full-screen.
+    const fid = 'app:' + app.id;
+    if (lwGet(fid).on) { lwRemoveWin(fid); lwSet(fid, { on: false }); }
     const resume = _frameApp === app.id && af.firstElementChild;   // same app still loaded
     if (_frameApp && _frameApp !== app.id) teardownFrameDom();      // one live frame
     if (!resume) {
@@ -4789,6 +5740,7 @@
           <div class="af-bar">
             <button class="af-nav" id="afBack" aria-label="Back">${ic('back',18)}</button>
             <span class="af-title"><span class="af-dot" style="background:${app.color}"></span>${esc(app.name)}</span>
+            <button class="af-nav" data-wfloat="${LW_DEFS[app.id] ? app.id : 'app:' + app.id}" aria-label="Float on home" title="Float on home">${ic('restore',15)}</button>
             <button class="af-nav" id="afHome" aria-label="Home">${ic('home',16)}</button>
           </div>
           <div class="af-view" id="afView">${view ? view.render(app) : placeholderView(app)}</div>
@@ -4803,7 +5755,7 @@
     requestAnimationFrame(() => af.classList.add('shown'));   // animate up + in
     updateHelm();
     updateInsight();   // margin now reflects THIS app's access, net, resources
-    syncLiveTermBrick();
+    syncLiveBricks();
   }
   function closeAppFrame(silent) {
     // Background (don't destroy): the frame hides but its DOM + state live on, so
@@ -4922,6 +5874,7 @@
   function musicView() { return `<div class="mu-wrap" id="muWrap"></div>`; }
   async function wireMusic() {
     const wrap = $('#muWrap'); if (!wrap) return;
+    if (_lwAudio) { try { _lwAudio.pause(); } catch (e) {} }   // one song at a time: the app takes over from the brick
     const r = await Sov.music();
     const tracks = (r && r.items) || [];
     if (!tracks.length) return wireMusicDemo(wrap);   // no ~/Music files → demo player
@@ -5201,21 +6154,24 @@
       </button>
       <div class="pin-scrim" id="pinScrim"></div>
       <div class="pin-sheet" id="pinSheet">
-        <div class="pin-grip" id="pinGrip" aria-hidden="true"></div>
-        <div class="lock-dots" id="lockDots">${dots}</div>
-        <div class="lock-hint">${ic('lock',12)}<span>Enter passcode</span></div>
-        <div class="keypad">
-          ${[1,2,3,4,5,6,7,8,9].map(n => key(n,'','data-k="'+n+'"')).join('')}
-          <button class="key fn" data-k="clear">Clear</button>
-          ${key(0,'','data-k="0"')}
-          <button class="key fn" data-k="back">⌫</button>
+        <div class="pin-body">
+          <div class="lock-hint">${ic('lock',12)}<span>Enter passcode</span></div>
+          <div class="lock-dots" id="lockDots">${dots}</div>
+          <div class="keypad">
+            ${[1,2,3,4,5,6,7,8,9].map(n => key(n,'','data-k="'+n+'"')).join('')}
+            <button class="key fn" data-k="clear">Clear</button>
+            ${key(0,'','data-k="0"')}
+            <button class="key fn" data-k="back">⌫</button>
+          </div>
         </div>
+        <button class="pin-cancel" id="pinCancel">Cancel</button>
       </div>`;
     $('#lock').querySelectorAll('[data-k]').forEach(b => b.onclick = () => onKey(b.dataset.k));
     $('#lockWake').onclick = openPinSheet;
     $('#pinScrim').onclick = closePinSheet;
-    // a drag on the grip also opens/closes it, like a real bottom sheet
-    wirePinGripDrag();
+    $('#pinCancel').onclick = closePinSheet;
+    // a drag down anywhere on the cover (not the keys) also dismisses it
+    wirePinSheetDrag();
     if (S.pinSheetOpen) {
       $('#pinSheet').classList.add('open');
       $('#pinScrim').classList.add('show');
@@ -5232,24 +6188,25 @@
     $('#pinSheet').classList.remove('open');
     $('#pinScrim').classList.remove('show');
   }
-  function wirePinGripDrag() {
-    const grip = $('#pinGrip'), sheet = $('#pinSheet');
-    if (!grip || !sheet) return;
-    grip.onpointerdown = e => {
+  function wirePinSheetDrag() {
+    const sheet = $('#pinSheet');
+    if (!sheet) return;
+    sheet.onpointerdown = e => {
+      if (e.target.closest('.key, .pin-cancel')) return;   // keys & Cancel own their taps
       e.preventDefault();
-      try { grip.setPointerCapture(e.pointerId); } catch (_) {}
-      const sy = e.clientY, h = sheet.offsetHeight;
+      try { sheet.setPointerCapture(e.pointerId); } catch (_) {}
+      const sy = e.clientY;
       sheet.style.transition = 'none';
       const move = ev => {
         const dy = Math.max(0, ev.clientY - sy);   // only downward (closing) drags
         sheet.style.transform = `translateY(${dy}px)`;
       };
       const up = ev => {
-        grip.onpointermove = grip.onpointerup = grip.onpointercancel = null;
+        sheet.onpointermove = sheet.onpointerup = sheet.onpointercancel = null;
         sheet.style.transition = ''; sheet.style.transform = '';
-        if ((ev.clientY - sy) > h * 0.28) closePinSheet();   // dragged past ~a third → dismiss
+        if ((ev.clientY - sy) > 130) closePinSheet();   // a real downward fling → dismiss
       };
-      grip.onpointermove = move; grip.onpointerup = up; grip.onpointercancel = up;
+      sheet.onpointermove = move; sheet.onpointerup = up; sheet.onpointercancel = up;
     };
   }
   async function onKey(k) {
@@ -5424,11 +6381,11 @@
     const rc = $('#recents');
     rc.classList.add('open');
     requestAnimationFrame(() => rc.classList.add('shown'));
-    syncLiveTermBrick();
+    syncLiveBricks();
   }
   function closeRecents() {
     S.recentsOpen = false;
-    syncLiveTermBrick();
+    syncLiveBricks();
     const rc = $('#recents');
     rc.classList.remove('shown');
     setTimeout(() => { if (!S.recentsOpen) { rc.classList.remove('open'); rc.innerHTML = ''; } }, 220);

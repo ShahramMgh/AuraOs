@@ -79,8 +79,18 @@ untouched. The Insight margin sits as a small handle on your chosen edge in ever
 context — home *and* inside any app — expanding only when tapped, so it never
 crowds the screen; a tap away collapses it. The
 full **A–Z icon grid is one tap away** in the
-app drawer ("All apps"). The only motion is a slow background aura, which honours
+app drawer ("All apps"). **Long-press (or right-click) any drawer icon** for
+its menu: Open, **Add to home / Remove from home**, and — for Android apps,
+the only kind that can be — **Uninstall** (built-ins say "Built-in" instead).
+The only motion is a slow background aura, which honours
 `prefers-reduced-motion`.
+
+**Home pages are fixed canvases, never a scroll.** A page holds exactly the
+rows that fit the screen; when it fills (or a widget grows and pushes icons
+past the last row), the overflow **flows onto the next page — creating one if
+none exists** — page by page, like a physical stack of trays. The first-run
+default layout spreads the catalog across pages the same way, and a
+rotation/resize re-lays the pages to the new row count.
 
 **Recents** (the helm's right button, or the orb's radial menu) is a real task
 switcher: every backgrounded session is a swipeable card carrying a **miniature
@@ -285,21 +295,53 @@ All of these were verified live against this machine's real `/proc`, `ps`, `df`,
 `nmcli`, the real filesystem, and a shell where `cd` persists across commands.
 The **Terminal** is a
 faithful TTY: a `user@host:path$` prompt, inline input in the scrollback, real
-command output and exit behavior (`bash: …: command not found`), history, and
-`clear` — it runs commands through the agent as the session user.
+command output and exit behavior (`bash: …: command not found`), history,
+`clear`, **Tab completion** (command names at the start of the line, files and
+directories after — one match completes, several print, bash-style, via a
+throwaway `compgen` over the same `/api/exec` route), and a **stoppable
+foreground command**: while something runs, a `stop` button sits in the busy
+row (Ctrl+C works too — and Ctrl+C on a half-typed line abandons it with the
+classic `^C`). Stop is a real interrupt: `/api/exec/cancel` SIGINTs the
+command's whole process group, escalating to SIGKILL if it won't die; the
+command's partial output lands in the scrollback with `^C` appended. Commands
+may run up to 120 s before the agent times them out — long enough for real
+package installs now that a runaway one can be stopped.
 
-**Live Terminal** (Personalize › Clock & widgets, off by default) is the first
-step toward bringing real desktop-style multitasking into the phone shell: a
-floating, draggable, resizable terminal window that sits **always on top of
-home**, independent of whatever else you're doing there — the rest of home
-keeps working normally underneath it (tap a tile, it still launches). It is
-**the same running session** as the full-screen Terminal app, not a copy —
-type a command in one, see it in the other, because it's one real shell, two
-windows onto it. Scope today is intentionally narrow: it shows on home only
-(it hides while an app is open, another screen is showing, or the device is
-locked, and reappears when you return) and there's one brick, not several.
-Full concurrent multi-app "live tiles" — several apps running visibly at once,
-each independently, anywhere — is the fuller vision this is a first step
+**Live bricks** bring real desktop-style multitasking into the phone shell:
+floating mini-app windows that sit **always on top of home**, independent of
+whatever else you're doing there — the rest of home keeps working normally
+underneath them (tap a tile, it still launches). The controls live **on the
+windows themselves, not in settings**: every app screen carries desktop-style
+window buttons in its header — **– minimize** (drop to home) and, where the
+app has a floating mini version, **❐ restore-down** (pop it out as a live
+brick over home). Each brick is a real window: a title bar with
+**minimize / maximize·restore / close**, draggable, resizable, and
+**snappable** — drag the header and release over a zone (halves, quadrants,
+full; a ghost previews the landing, corner pads fade in as drop hints) and
+the window docks there and holds that spot; drag it again to pop free.
+Minimized windows park as title pills along the bottom edge.
+
+**Any app can float.** Apps that open in the app frame (Browser, Camera,
+Maps, Photos, Messages, Contacts, Phone, Android apps…) float generically:
+the window hosts the app's **real view** — the same render the full-screen
+frame uses. One-instance rule: an app's view exists exactly once, so floating
+tears the full-screen frame down (its close handler runs) and opening the app
+full-screen closes its floating window. Five apps additionally have curated
+compact minis, each real data or an honest absence:
+- **Terminal** — **the same running session** as the full-screen Terminal
+  app, not a copy: type a command in one, see it in the other, because it's
+  one real shell, two windows onto it (plus A−/A+ text sizing).
+- **Files** — a compact browser over the real filesystem, with its own
+  working folder; tapping a file hands over to the full Files app there.
+- **Monitor** — live CPU, memory and uptime from `/api/system`.
+- **Scratchpad** — a quick note, autosaved into the real Notes store.
+- **Music** — a mini player over `~/Music`; the track keeps playing when the
+  window hides, and it and the full Music app pause each other.
+
+Scope today is intentionally home-only: bricks hide while an app is open,
+another screen is showing, or the device is locked, and reappear on return.
+Full concurrent multi-app "live tiles" — several apps running visibly at
+once, each independently, anywhere — is the fuller vision this is a step
 toward; see `DEVELOPMENT.md` §3.4.2 for that larger windowing milestone.
 
 **Native apps that open *inside* the shell.** Alongside Files, Terminal, Settings,

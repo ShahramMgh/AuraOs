@@ -17,7 +17,7 @@
 #     the shell keeps working everywhere.
 #   - Binds to 127.0.0.1 only. Never listens on the network.
 # ============================================================================
-import base64, json, os, re, secrets, shlex, shutil, socket, stat, subprocess, sys, glob, time
+import base64, json, os, re, secrets, shlex, shutil, signal, socket, stat, subprocess, sys, glob, threading, time
 import urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit, parse_qs
@@ -410,9 +410,18 @@ def wifi_scan():
     return sorted(best.values(), key=lambda x: (-x["active"], -x["signal"]))
 
 
+# The one command the Terminal is running right now (the shell serializes
+# commands, so a single slot is honest). /api/exec/cancel signals it — a real
+# Ctrl-C: SIGINT to the whole process group, SIGKILL if it won't die.
+_EXEC_LOCK = threading.Lock()
+_EXEC_PROC = None
+_EXEC_TIMEOUT = 120   # generous now that a runaway command can be stopped
+
+
 def run_exec(cmd, cwd):
     """Run a shell command for the Terminal app. Localhost-only, runs as the
     session user — this is the user's own device asking for a real shell."""
+    global _EXEC_PROC
     home = os.path.expanduser("~")
     cwd = cwd if (cwd and os.path.isdir(cwd)) else home
     marker = "__AURA_CWD__"
@@ -421,13 +430,29 @@ def run_exec(cmd, cwd):
     # otherwise a command's stderr lands after the marker and corrupts parsing.
     full = f"{cmd}\nprintf '\\n{marker}:%s\\n' \"$(pwd)\""
     try:
-        p = subprocess.run(["bash", "-lc", full],
-                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                           text=True, timeout=20, cwd=cwd)
-        out = p.stdout or ""
+        # start_new_session → the command leads its own process group, so a
+        # cancel (or timeout) can signal the whole tree, not just bash.
+        p = subprocess.Popen(["bash", "-lc", full],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True, cwd=cwd, start_new_session=True)
+        with _EXEC_LOCK:
+            _EXEC_PROC = p
+        try:
+            out, _ = p.communicate(timeout=_EXEC_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+            except Exception:
+                pass
+            out, _ = p.communicate()
+            out = (out or "").rstrip("\n")
+            return {"out": out + f"\n(command timed out after {_EXEC_TIMEOUT}s)",
+                    "cwd": cwd, "rc": 124}
+        finally:
+            with _EXEC_LOCK:
+                _EXEC_PROC = None
+        out = out or ""
         rc = p.returncode
-    except subprocess.TimeoutExpired:
-        return {"out": "(command timed out after 20s)", "cwd": cwd, "rc": 124}
     except Exception as e:
         return {"out": f"(error: {e})", "cwd": cwd, "rc": 1}
     newcwd = cwd
@@ -436,7 +461,36 @@ def run_exec(cmd, cwd):
     if idx >= 0:
         newcwd = out[idx + len(mk):].strip() or cwd     # after the marker → cwd
         out = out[:idx].rstrip("\n")                     # before it → real output
+    elif rc == 130 or (rc or 0) < 0:
+        # killed before the marker printed (cancel / signal): partial output,
+        # cwd unchanged, and the classic ^C so the scrollback tells the truth
+        out = out.rstrip("\n") + ("\n" if out.strip() else "") + "^C"
     return {"out": out, "cwd": newcwd, "rc": rc}
+
+
+def exec_cancel():
+    """Stop the running Terminal command — the OS-side of Ctrl-C. SIGINT to
+    the process group first (a polite interrupt, cleanup traps run); a
+    watchdog escalates to SIGKILL if it's still alive shortly after."""
+    with _EXEC_LOCK:
+        p = _EXEC_PROC
+    if not p or p.poll() is not None:
+        return {"ok": True, "stopped": False}   # nothing running — honest no-op
+    try:
+        pgid = os.getpgid(p.pid)
+        os.killpg(pgid, signal.SIGINT)
+    except Exception:
+        return {"ok": False, "stopped": False}
+
+    def _escalate():
+        time.sleep(1.5)
+        if p.poll() is None:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except Exception:
+                pass
+    threading.Thread(target=_escalate, daemon=True).start()
+    return {"ok": True, "stopped": True}
 
 
 # ============================================================================
@@ -1671,6 +1725,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if p == "/api/exec":
             return self._send(200, run_exec(body.get("cmd", ""), body.get("cwd")))
+        if p == "/api/exec/cancel":
+            return self._send(200, exec_cancel())
 
         if p == "/api/files/op":
             return self._send(200, fm_op(body.get("op", ""), body.get("path", ""),

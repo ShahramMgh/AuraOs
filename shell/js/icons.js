@@ -82,6 +82,10 @@ const ICON = (() => {
     stop:       `<rect x="6" y="6" width="12" height="12" rx="2"/>`,
     memory:     `<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 5v14M4 9h4M4 13h4M16 9h4M16 13h4"/>`,
     logo:       `<path d="M12 2l8 3.5v6C20 18 16.4 22 12 23.5 7.6 22 4 18 4 11.5v-6z" stroke-width="1.4"/><path d="M12 7v10M8.5 9.5L12 7l3.5 2.5M8.5 14.5L12 17l3.5-2.5" stroke-width="1.4"/>`,
+    // window controls (live terminal chrome)
+    minus:      `<path d="M5 12h14"/>`,
+    maximize:   `<rect x="5" y="5" width="14" height="14" rx="2"/>`,
+    restore:    `<rect x="4" y="8" width="12" height="12" rx="2"/><path d="M8 8V6a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2"/>`,
   };
 
   return {

@@ -74,6 +74,8 @@ def main():
         check("no-token /api/status refused", call("GET", base + "/api/status")[0], 401)
         check("no-token /api/exec refused",
               call("POST", base + "/api/exec", body={"cmd": "id"})[0], 401)
+        check("no-token /api/exec/cancel refused",
+              call("POST", base + "/api/exec/cancel", body={})[0], 401)
         check("no-token /api/files/read refused",
               call("GET", base + "/api/files/read?path=/etc/passwd")[0], 401)
         check("wrong-token refused", call("GET", base + "/api/status", token="wrong")[0], 401)

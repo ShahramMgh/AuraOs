@@ -505,7 +505,10 @@ input  { font: inherit; }
 
 .home2-body {
   position: relative; z-index: 1;
-  flex: 1 1 auto; overflow-y: auto; overflow-x: hidden;
+  /* NOT scrollable: a home page is a fixed canvas. When a page's rows fill,
+     icons flow to the next page (homeLayout's overflow pass) — never below
+     the fold. Only the horizontal pager moves. */
+  flex: 1 1 auto; overflow-y: hidden; overflow-x: hidden;
   padding: 30px 18px 14px; scrollbar-width: none;
 }
 .home2-body::-webkit-scrollbar { display: none; }
@@ -523,7 +526,7 @@ input  { font: inherit; }
 
 /* ---- the Aura: the living companion at the top of home ---- */
 .home2-body { padding-top: 14px; }
-.aura-hero { display: flex; flex-direction: column; align-items: center; padding: 4px 0 6px; }
+.aura-hero { display: flex; flex-direction: column; align-items: center; padding: 0; }
 
 /* ---- home widgets: full-width grid residents -------------------------------
    Widgets (clock hero · focus card · Up next) live INSIDE the page's slot
@@ -576,7 +579,7 @@ input  { font: inherit; }
 .aura-hero.align-left .aura-wx, .aura-hero.align-left .aura-date { align-self: flex-start; }
 .aura-hero.align-right .aura-wx, .aura-hero.align-right .aura-date { align-self: flex-end; }
 .aura-status {
-  display: inline-flex; align-items: center; gap: 8px; margin-top: 16px;
+  display: inline-flex; align-items: center; gap: 8px; margin-top: 10px;
   font-size: 12px; color: var(--text-1);
   background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .08);
   border-radius: 999px; padding: 7px 15px;
@@ -746,16 +749,18 @@ input  { font: inherit; }
   background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 .tile-ic {
-  position: relative; width: 58px; height: 58px; border-radius: 18px;
+  position: relative; width: 61px; height: 61px; border-radius: 20px;
   display: flex; align-items: center; justify-content: center; color: #fff;
   background:
-    radial-gradient(135% 120% at 28% 10%, rgba(255, 255, 255, .34), rgba(255, 255, 255, 0) 52%),
-    linear-gradient(150deg,
-      color-mix(in srgb, var(--col) 84%, #16232F),
-      color-mix(in srgb, var(--col) 48%, #0B1620));
-  border: 1px solid color-mix(in srgb, var(--col) 46%, rgba(255, 255, 255, .12));
-  box-shadow: 0 14px 30px -12px color-mix(in srgb, var(--col) 55%, rgba(0, 0, 0, .85)),
-              inset 0 1px 0 rgba(255, 255, 255, .26);
+    radial-gradient(140% 110% at 30% 6%, rgba(255, 255, 255, .38), rgba(255, 255, 255, 0) 48%),
+    radial-gradient(120% 90% at 50% 118%, color-mix(in srgb, var(--col) 40%, transparent), transparent 60%),
+    linear-gradient(155deg,
+      color-mix(in srgb, var(--col) 90%, #1A2836),
+      color-mix(in srgb, var(--col) 46%, #0A141E));
+  border: 1px solid color-mix(in srgb, var(--col) 52%, rgba(255, 255, 255, .14));
+  box-shadow: 0 16px 32px -12px color-mix(in srgb, var(--col) 58%, rgba(0, 0, 0, .85)),
+              inset 0 1px 0 rgba(255, 255, 255, .3),
+              inset 0 -10px 18px -12px rgba(0, 0, 0, .5);
   transition: transform .32s var(--spring), box-shadow .3s var(--ease);
 }
 .tile:active .tile-ic { transform: scale(.9); }
@@ -780,9 +785,10 @@ input  { font: inherit; }
 .tile:active .tile-glow { opacity: .62; transform: scale(1); }
 .tile-ic svg { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .45)); }
 .tile-lbl {
-  font-size: 11.5px; color: var(--text-1); text-align: center; line-height: 1.2;
-  max-width: 74px; letter-spacing: .01em;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, .5);
+  font-size: 11px; font-weight: 500; color: color-mix(in srgb, var(--text-0) 86%, transparent);
+  text-align: center; line-height: 1.2; max-width: 76px; letter-spacing: .01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, .6);
 }
 .tile-dot {
   position: absolute; top: -3px; right: -3px; width: 12px; height: 12px; border-radius: 50%;
@@ -1061,9 +1067,22 @@ input  { font: inherit; }
 /* ============================================================================
    SUB-SCREENS (Permissions / Network / Vault / Settings) — pushed views
    ============================================================================ */
-.screen-head { margin-bottom: 4px; }
+.screen-head { margin-bottom: 4px; position: relative; }
+.screen-head .eyebrow, .screen-head .h1 { padding-right: 72px; }   /* clear of the window buttons */
 .screen-head .eyebrow { color: var(--accent); text-shadow: 0 0 14px color-mix(in srgb, var(--accent) 35%, transparent); }
 .screen-head .h1 { margin-top: 5px; }
+/* desktop-style window controls on every screen: minimize (– → home) and,
+   where a live-brick mini version exists, restore-down (❐ → float on home) */
+.wm-ctrls { position: absolute; top: 2px; right: 0; display: flex; gap: 5px; }
+.wm-btn {
+  width: 28px; height: 26px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-2); background: rgba(255, 255, 255, .05);
+  border: 1px solid var(--line);
+  transition: background .15s, color .15s;
+}
+.wm-btn:hover { background: rgba(255, 255, 255, .1); color: var(--text-0); }
+.wm-btn:active { background: rgba(255, 255, 255, .15); }
 .screen-lead { color: var(--text-2); font-size: 13px; margin-top: 7px; line-height: 1.55; }
 
 /* Permissions */
@@ -1253,38 +1272,42 @@ input  { font: inherit; }
   transition: opacity .3s var(--ease);
 }
 .pin-scrim.show { opacity: 1; pointer-events: auto; }
-/* A floating card, not an edge-to-edge sheet: #device's own frame has a big
-   (42px) corner radius for the desktop preview, and a sheet flush with its
-   square bottom corners against that curve got visibly clipped by the
-   frame's overflow:hidden. Margin on every side + full rounding clears it
-   regardless of frame radius or viewport size. */
+/* iOS-style: the passcode cover slides up over the ENTIRE lock screen when
+   asked for, and is fully gone (visibility:hidden after the slide) when not —
+   it never reserves space, never peeks. Dismiss by Cancel or a drag down on
+   the grip; the lock screen underneath stays complete until you ask. */
 .pin-sheet {
-  /* A centered card that HUGS the keypad, not an edge-to-edge slab: pinned
-     left/right:14px only as a narrow-screen clamp, but margin:auto + max-width
-     keep it the width of its content (keypad is 3×72 + 2×16 = 248px), so it
-     reads as a deliberate floating passcode card instead of a wide panel with
-     the pad marooned in the middle. margin handles the horizontal centering;
-     the transform below is left free for the slide-in/out. */
-  position: absolute; left: 14px; right: 14px; bottom: 16px; z-index: 2;
-  margin: 0 auto; max-width: 300px;
+  position: absolute; inset: 0; z-index: 2;
   display: flex; flex-direction: column; align-items: center;
-  padding: 12px 22px 24px;
-  border-radius: 34px;
+  padding: 14px 22px 26px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, .05), rgba(255, 255, 255, 0) 30%),
-    rgba(9, 15, 23, .86);
-  border: 1px solid var(--line-hi);
-  box-shadow: 0 30px 70px -20px rgba(0, 0, 0, .85), var(--edge);
-  -webkit-backdrop-filter: blur(28px) saturate(1.4); backdrop-filter: blur(28px) saturate(1.4);
-  transform: translateY(calc(100% + 28px));
-  transition: transform .38s var(--spring);
+    linear-gradient(180deg, rgba(10, 17, 26, .58), rgba(4, 8, 14, .82)),
+    var(--wp-scrim, rgba(0, 0, 0, 0));
+  -webkit-backdrop-filter: blur(36px) saturate(1.35); backdrop-filter: blur(36px) saturate(1.35);
+  transform: translateY(102%);
+  visibility: hidden;
+  transition: transform .42s var(--spring), visibility 0s linear .42s;
 }
-.pin-sheet.open { transform: translateY(0); }
-.pin-grip {
-  width: 36px; height: 5px; border-radius: 3px; background: var(--line-hi);
-  margin-bottom: 16px; cursor: grab; touch-action: none;
+.pin-sheet.open { transform: translateY(0); visibility: visible;
+  transition: transform .42s var(--spring); }
+/* the keypad block floats centered in the free space, like iOS's pad */
+.pin-body {
+  flex: 1 1 auto; min-height: 0; width: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
 }
-.pin-grip:active { cursor: grabbing; }
+.pin-cancel {
+  flex: 0 0 auto; margin-top: 12px; padding: 12px 30px; border-radius: 999px;
+  font-size: 14px; color: var(--text-1); letter-spacing: .01em;
+}
+.pin-cancel:active { color: var(--text-0); }
+.pin-sheet { touch-action: none; }   /* the cover itself is the dismiss handle */
+.pin-body .lock-hint { margin-bottom: 18px; }
+.pin-body .lock-dots { margin-bottom: 36px; }
+/* no backdrop-filter (older engines): a nearly-solid cover instead of a
+   see-through one — the lock content must not read through the passcode UI */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .pin-sheet { background: linear-gradient(180deg, rgba(8, 14, 22, .97), rgba(4, 8, 14, .99)); }
+}
 .lock-dots { display: flex; gap: 15px; margin-bottom: 13px; }
 .lock-dots .ld { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--line-hi); transition: all .18s var(--ease); }
 .lock-dots .ld.f {
@@ -1345,19 +1368,20 @@ input  { font: inherit; }
 #appframe.open { display: flex; }
 
 /* ============================================================================
-   LIVE TERMINAL BRICK — a real, running terminal that floats over home,
-   always on top, draggable and resizable (Personalize › Clock & widgets).
+   LIVE BRICKS — real, running mini-app windows floating over home (terminal ·
+   monitor · scratchpad · music), each with min/max/close, draggable, resizable
+   and snappable to screen zones (Personalize › Clock & widgets).
    Confined to the same content band as #appframe so the pane/helm stay
-   reachable; pointer-events pass through everywhere except the window itself.
+   reachable; pointer-events pass through everywhere except the windows.
    ============================================================================ */
-#liveTerm {
+#liveWins {
   position: absolute; left: 0; right: 0;
   top: var(--pane-h); bottom: var(--helm-h);
   z-index: 50; pointer-events: none;
 }
 .lt-win {
-  position: absolute; pointer-events: auto;
-  min-width: 160px; min-height: 140px;
+  position: absolute; pointer-events: auto; z-index: 10;
+  min-width: 160px; min-height: 120px;
   display: flex; flex-direction: column; overflow: hidden;
   border-radius: 16px;
   background: color-mix(in srgb, var(--s1) 88%, transparent);
@@ -1365,11 +1389,24 @@ input  { font: inherit; }
   box-shadow: var(--edge), 0 22px 50px -20px rgba(0, 0, 0, .85), 0 0 0 1px rgba(0, 0, 0, .3);
   -webkit-backdrop-filter: blur(18px) saturate(1.3); backdrop-filter: blur(18px) saturate(1.3);
   animation: ltIn .3s var(--spring) backwards;
+  /* smooth glide when snapping to / restoring from a brick; killed mid-drag */
+  transition: left .2s var(--spring), top .2s var(--spring),
+              width .2s var(--spring), height .2s var(--spring);
 }
+.lt-win.lt-moving { transition: none; }
+/* stuck to a zone: a brighter accent frame marks it as docked, and the
+   corners it shares with the screen edges square off — visually "welded" */
+.lt-win.lt-stuck { border-color: color-mix(in srgb, var(--accent) 40%, var(--line-hi)); }
+.lt-win[data-snap="full"], .lt-win[data-snap="tl"], .lt-win[data-snap="left"] { border-top-left-radius: 7px; }
+.lt-win[data-snap="full"], .lt-win[data-snap="tr"], .lt-win[data-snap="right"] { border-top-right-radius: 7px; }
+.lt-win[data-snap="full"], .lt-win[data-snap="bl"], .lt-win[data-snap="left"],
+.lt-win[data-snap="bottom"] { border-bottom-left-radius: 7px; }
+.lt-win[data-snap="full"], .lt-win[data-snap="br"], .lt-win[data-snap="right"],
+.lt-win[data-snap="bottom"] { border-bottom-right-radius: 7px; }
 @keyframes ltIn { from { opacity: 0; transform: scale(.92); } to { opacity: 1; transform: none; } }
 .lt-head {
   flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
-  padding: 8px 6px 8px 12px; cursor: grab;
+  padding: 7px 7px 7px 12px; cursor: grab;
   background: color-mix(in srgb, var(--accent) 8%, transparent);
   border-bottom: 1px solid var(--line); touch-action: none;
 }
@@ -1378,24 +1415,144 @@ input  { font: inherit; }
   background: var(--ok); box-shadow: 0 0 6px var(--ok); }
 .lt-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px;
   font-size: 12px; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lt-x {
-  width: 22px; height: 22px; border-radius: 50%; flex: 0 0 auto;
+/* window controls — minimize · maximize/restore · close (Windows-style, right) */
+.lt-ctrls { flex: 0 0 auto; display: flex; align-items: center; gap: 4px; }
+.lt-ctrl {
+  width: 24px; height: 22px; border-radius: 6px; flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
-  color: var(--text-2); background: rgba(255, 255, 255, .06);
+  color: var(--text-2); background: transparent;
   transition: background .15s, color .15s;
 }
-.lt-x:active { background: rgba(255, 90, 90, .25); color: #fff; }
+.lt-ctrl:hover { background: rgba(255, 255, 255, .09); color: var(--text-0); }
+.lt-ctrl:active { background: rgba(255, 255, 255, .14); }
+.lt-x:hover  { background: rgba(255, 90, 90, .22); color: #fff; }
+.lt-x:active { background: rgba(255, 90, 90, .32); color: #fff; }
+.lt-font { width: 26px; font-size: 10.5px; font-weight: 600; letter-spacing: -.02em; }
+/* every brick's content lives in the body — a flex column the content fills */
+.lt-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .lt-term.term {
   flex: 1 1 auto; height: auto; min-height: 0; border-radius: 0; border: none;
   box-shadow: none; font-size: 11.5px; padding: 8px 10px; background: transparent;
 }
-.lt-in { font-size: 11.5px; }
+.lt-term .term-in, .lt-in { font-size: inherit; }
 .lt-resize {
   position: absolute; right: 2px; bottom: 2px; width: 22px; height: 22px;
   display: flex; align-items: center; justify-content: center;
   color: var(--text-3); cursor: nwse-resize; touch-action: none;
   transform: rotate(45deg);
 }
+/* minimized: collapse to a title-bar pill parked along the bottom edge */
+.lt-win.lt-mini { min-width: 0; min-height: 0; border-radius: 12px; }
+.lt-win.lt-mini .lt-body, .lt-win.lt-mini .lt-resize { display: none; }
+.lt-win.lt-mini .lt-head { border-bottom: none; cursor: pointer; padding: 6px 7px 6px 12px; }
+.lt-win.lt-mini [data-lwbtn="min"], .lt-win.lt-mini [data-lwbtn="max"],
+.lt-win.lt-mini .lt-font { display: none; }   /* a pill only restores or closes */
+
+/* ---- brick contents ---- */
+.lw-sys { padding: 8px 14px 10px; display: flex; flex-direction: column; overflow: hidden; }
+.lw-sys-up { display: flex; justify-content: space-between; margin-top: 6px;
+  font-size: 11.5px; color: var(--text-2); }
+.lw-sys-up b { color: var(--text-1); font-family: var(--mono); font-weight: 500; }
+.lw-note-wrap { position: relative; flex: 1; display: flex; min-height: 0; }
+.lw-note {
+  flex: 1; min-height: 0; resize: none; border: none; outline: none;
+  background: transparent; color: var(--text-0);
+  font: 12.5px/1.55 inherit; font-family: inherit; padding: 10px 12px;
+}
+.lw-note::placeholder { color: var(--text-3); }
+.lw-note-saved { position: absolute; right: 10px; bottom: 6px; font-size: 10.5px;
+  color: var(--ok); pointer-events: none; }
+.lw-mu { flex: 1; min-height: 0; display: flex; flex-direction: column;
+  justify-content: center; gap: 8px; padding: 8px 14px 10px; }
+.lw-mu-t { font-size: 12.5px; color: var(--text-0); text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lw-mu-seek { height: 5px; border-radius: 3px; background: var(--s2);
+  overflow: hidden; cursor: pointer; }
+.lw-mu-seek > span { display: block; height: 100%; width: 0; border-radius: 3px;
+  background: var(--accent); }
+.lw-mu-ctrls { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.lw-mu-ctrls .lt-ctrl { width: 30px; height: 26px; }
+.lw-mu-ctrls .lw-mu-play { width: 36px; height: 30px;
+  background: rgba(255, 255, 255, .07); border-radius: 9px; }
+.lw-empty { flex: 1; display: flex; align-items: center; justify-content: center;
+  font-size: 12px; color: var(--text-2); text-align: center; padding: 10px 16px; }
+/* a floated APP window hosts the app's real view — same flex environment the
+   full-screen frame's .af-view provides, just smaller */
+.lw-appview { flex: 1; min-height: 0; position: relative; overflow: hidden;
+  display: flex; flex-direction: column; }
+.lw-fm { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.lw-fm-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; border-bottom: 1px solid var(--line); }
+.lw-fm-path { font-size: 11px; color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lw-fm-list { flex: 1; min-height: 0; overflow-y: auto; padding: 3px 4px; }
+.lw-fm-list::-webkit-scrollbar { width: 6px; }
+.lw-fm-list::-webkit-scrollbar-thumb { background: var(--s3); border-radius: 3px; }
+.lw-fm-row {
+  width: 100%; display: flex; align-items: center; gap: 8px; text-align: left;
+  padding: 5px 8px; border-radius: 8px; font-size: 12px; color: var(--text-1);
+}
+.lw-fm-row:hover { background: rgba(255, 255, 255, .05); }
+.lw-fm-row:active { background: rgba(255, 255, 255, .09); }
+.lw-fm-ic { flex: 0 0 auto; display: inline-flex; }
+.lw-fm-n { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lw-fm-chev { flex: 0 0 auto; color: var(--text-3); display: inline-flex; }
+
+/* ---- snap bricks: the drag-time landing preview + the fixed anchor pads ---- */
+.lt-ghost {
+  position: absolute; pointer-events: none; opacity: 0; z-index: 1;
+  border-radius: 16px; display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: inset 0 0 40px color-mix(in srgb, var(--accent) 18%, transparent);
+  transition: left .12s var(--ease), top .12s var(--ease),
+              width .12s var(--ease), height .12s var(--ease), opacity .12s;
+}
+.lt-ghost.on { opacity: 1; }
+.lt-ghost-label {
+  font-size: 12px; font-weight: 600; letter-spacing: .01em; color: var(--text-0);
+  padding: 5px 12px; border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 30%, rgba(0, 0, 0, .5));
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+}
+/* corner pads: invisible until a window is being dragged, then they fade in
+   as drop hints — the one matching the zone under the pointer lights up */
+.lt-pads { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
+.lt-pad {
+  position: absolute; pointer-events: none;
+  width: 30px; height: 30px; padding: 0; border-radius: 9px;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--s1) 60%, transparent);
+  border: 1px solid var(--line-hi); opacity: 0; transform: scale(.8);
+  box-shadow: 0 6px 16px -8px rgba(0, 0, 0, .8);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  transition: opacity .18s, transform .18s, background .15s, border-color .15s;
+}
+#liveWins.dragging .lt-pad { opacity: .75; transform: none; }
+.lt-pad > span {   /* the little "where it'll dock" corner mark inside the pad */
+  width: 13px; height: 13px; border-radius: 3px;
+  border: 1.5px solid var(--text-2); position: relative; overflow: hidden;
+}
+.lt-pad > span::after {
+  content: ""; position: absolute; width: 55%; height: 55%;
+  background: var(--text-2); border-radius: 1px;
+}
+.lt-pad--tl > span::after { left: 0; top: 0; }
+.lt-pad--tr > span::after { right: 0; top: 0; }
+.lt-pad--bl > span::after { left: 0; bottom: 0; }
+.lt-pad--br > span::after { right: 0; bottom: 0; }
+#liveWins.dragging .lt-pad.on {
+  opacity: 1; transform: scale(1.12);
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.lt-pad.on > span { border-color: #fff; }
+.lt-pad.on > span::after { background: #fff; }
+.lt-pad--tl { left: 10px;  top: 10px; }
+.lt-pad--tr { right: 10px; top: 10px; }
+.lt-pad--bl { left: 10px;  bottom: 10px; }
+.lt-pad--br { right: 10px; bottom: 10px; }
 .appframe-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 15px; padding: 30px; text-align: center; }
 .appframe-body .af-badge {
   width: 68px; height: 68px; border-radius: 19px;
@@ -1820,7 +1977,17 @@ input  { font: inherit; }
 .tl-out { color: var(--text-1); }
 .tl-sys { color: var(--text-2); }
 .tl-cmd { color: var(--text-0); }
-.tl-busy { color: var(--text-2); }
+.tl-busy { color: var(--text-2); display: flex; align-items: center; gap: 10px; }
+/* stop the running command — a real Ctrl-C, right in the scrollback */
+.term-stop {
+  display: inline-flex; align-items: center; gap: 5px;
+  font: inherit; font-size: .92em; color: #ff9a9a;
+  padding: 2px 9px; border-radius: 999px;
+  background: rgba(255, 90, 90, .12); border: 1px solid rgba(255, 90, 90, .3);
+  transition: background .15s;
+}
+.term-stop:hover, .term-stop:focus-visible { background: rgba(255, 90, 90, .22); outline: none; }
+.term-stop:disabled { opacity: .5; }
 .tp { white-space: nowrap; }            /* the prompt never breaks mid-word */
 .tp-user { color: var(--green-hi); }
 .tp-path { color: var(--accent-hi); }
@@ -2224,7 +2391,10 @@ input  { font: inherit; }
    ============================================================================ */
 /* the same ambient layer sits on the lock screen, behind its content */
 #lock .home2-aura { z-index: 0; }
-#lock > *:not(.home2-aura) { position: relative; z-index: 1; }
+/* the pin layers are excluded: they are position:absolute overlays, and this
+   blanket `relative` used to pull the CLOSED pin sheet into the lock screen's
+   flex flow — reserving a phantom hole where the keypad would appear */
+#lock > *:not(.home2-aura):not(.pin-scrim):not(.pin-sheet) { position: relative; z-index: 1; }
 
 /* minimal: no ambient layer at all */
 :root[data-fx="off"] .home2-aura { display: none; }
@@ -2845,10 +3015,10 @@ input  { font: inherit; }
 .pg-view.show { display: block; }
 
 /* ── Home pages (swipeable pager) ───────────────────────────────────────── */
-/* The pager fills the home view (minus the search pill + dots), so every
-   page's grid reaches from the top of the screen to the bottom — icons and
-   widgets can be placed on any row, first to last. */
-.home-pager { min-height: calc(100% - 112px); }
+/* The pager fills the home view (minus the page dots), so every page's grid
+   reaches from the top of the screen to the bottom — icons and widgets
+   (search pill included) can be placed on any row, first to last. */
+.home-pager { min-height: calc(100% - 48px); }
 .home-page { display: flex; flex-direction: column; }
 .home-pager { display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
   scroll-behavior: smooth; scrollbar-width: none; align-items: flex-start; }
@@ -2877,10 +3047,17 @@ input  { font: inherit; }
   background: var(--s3); color: var(--text-0); border: 1px solid var(--line); box-shadow: 0 2px 6px rgba(0, 0, 0, .4); }
 .home2-body.editing .tile-x { display: flex; }
 .tile-x:active { transform: scale(.9); }
-.home-edit-bar { display: none; gap: 8px; align-items: center; justify-content: center; margin: 16px 8px 4px; }
+/* floats above the grid while editing (sticky at the foot of the scroll), so
+   it's reachable without scrolling a full page of icons out of the way */
+.home-edit-bar { display: none; position: sticky; bottom: 8px; z-index: 6;
+  gap: 7px; flex-wrap: wrap; align-items: center; justify-content: center; margin: 16px 4px 4px; }
 .home2-body.editing .home-edit-bar { display: flex; }
-#upnextSlot:empty, .home2-body.editing #upnextSlot { display: none; }
-.home2-body.editing .home-search { display: none; }
+/* a scroll runway under the grid, so the last icon row can always be
+   scrolled clear of the floating bar instead of hiding beneath it */
+.home2-body.editing .home-pager { padding-bottom: 56px; }
+/* In edit mode the card stays VISIBLE (dimmed chrome via .editing) so the
+   widget reads as itself while you drag it — an empty slot still collapses. */
+#upnextSlot:empty { display: none; }
 .heb-btn { display: flex; align-items: center; gap: 6px; padding: 9px 14px; border-radius: 12px; font-size: 12px;
   color: var(--text-1); background: var(--glass); border: 1px solid var(--line);
   -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
@@ -3007,12 +3184,19 @@ input  { font: inherit; }
 /* Real Android icon in the app-frame badge */
 .af-placeholder .af-badge .af-badge-img { width: 100%; height: 100%; border-radius: 16px; object-fit: cover; display: block; }
 
-/* Home search pill (opens the universal search) */
-.home-search { display: flex; align-items: center; gap: 9px; width: 100%; padding: 11px 14px; margin-top: 12px;
-  margin: 2px 0 12px; border-radius: 14px; background: var(--glass); border: 1px solid var(--line);
-  color: var(--text-2); font-size: 13px; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
-.home-search svg { flex: 0 0 auto; }
-.home-search:active { border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--text-1); }
+/* Home search pill — a grid widget like the clock: draggable to any row in
+   edit mode (wireWidgetDrag), persisted like every other home resident. */
+.home-search { display: flex; align-items: center; gap: 10px; width: 100%; max-width: 320px;
+  margin: 0 auto; padding: 13px 18px; border-radius: 999px;
+  background: linear-gradient(rgba(255, 255, 255, .07), rgba(255, 255, 255, .035));
+  border: 1px solid rgba(255, 255, 255, .12);
+  color: var(--text-2); font-size: 13px;
+  box-shadow: var(--edge), 0 14px 30px -18px rgba(0, 0, 0, .9);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3); backdrop-filter: blur(16px) saturate(1.3);
+  transition: border-color .2s, color .2s, transform .25s var(--spring); }
+.home-search svg { flex: 0 0 auto; color: color-mix(in srgb, var(--accent) 80%, #fff); }
+.home-search:active { border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--text-1); transform: scale(.98); }
 
 /* ── The Aura orb + its radial menu ──────────────────────────────────────── */
 .home-orb { position: relative; overflow: visible; }
@@ -3262,3 +3446,72 @@ input  { font: inherit; }
   font-family: var(--mono); font-size: 9px; letter-spacing: .08em; text-transform: uppercase;
   color: #EEF7FD; background: rgba(3, 7, 12, .55); border: 1px solid rgba(255, 255, 255, .18);
   border-radius: 999px; padding: 3px 8px; -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+
+/* ============================================================================
+   HOME v2 CHROME — app-info peek + the long-press Style sheet
+   ============================================================================ */
+/* a quiet ghost variant for secondary sheet actions (was unstyled before) */
+.pbtn.ghost { color: var(--text-1); background: rgba(255, 255, 255, .04); border-color: var(--line); }
+.pbtn.ghost:active { color: var(--text-0); background: rgba(255, 255, 255, .07); }
+
+/* ── App info card (long-press a home tile — the peek) ── */
+.app-info { width: 320px; max-width: 88vw; text-align: left; animation: aicIn .28s var(--spring); }
+@keyframes aicIn { from { opacity: 0; transform: scale(.9) translateY(10px); } to { opacity: 1; transform: none; } }
+.aic-head { display: flex; align-items: center; gap: 13px; }
+.aic-ic {
+  flex: 0 0 auto; width: 58px; height: 58px; border-radius: 19px;
+  display: flex; align-items: center; justify-content: center; color: #fff;
+  background:
+    radial-gradient(140% 110% at 30% 6%, rgba(255, 255, 255, .38), rgba(255, 255, 255, 0) 48%),
+    linear-gradient(155deg,
+      color-mix(in srgb, var(--col) 90%, #1A2836),
+      color-mix(in srgb, var(--col) 46%, #0A141E));
+  border: 1px solid color-mix(in srgb, var(--col) 52%, rgba(255, 255, 255, .14));
+  box-shadow: 0 14px 28px -12px color-mix(in srgb, var(--col) 60%, rgba(0, 0, 0, .8)),
+              inset 0 1px 0 rgba(255, 255, 255, .3);
+}
+:root[data-tiles="round"] .aic-ic { border-radius: 50%; }
+:root[data-tiles="sharp"] .aic-ic { border-radius: 10px; }
+.aic-t { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.aic-name { font-size: 17px; font-weight: 600; color: var(--text-0); letter-spacing: -.01em; }
+.aic-sub { font-size: 10.5px; color: var(--text-2); font-family: var(--mono); letter-spacing: .02em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aic-about { margin-top: 12px; font-size: 13px; line-height: 1.55; color: var(--text-1); }
+.aic-live { display: flex; align-items: center; gap: 7px; margin-top: 10px; padding: 8px 11px;
+  border-radius: 11px; font-size: 12px; color: var(--warn); background: var(--warn-bg);
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); }
+.aic-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.aic-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 999px;
+  font-size: 11px; color: var(--text-2); background: rgba(255, 255, 255, .04); border: 1px solid var(--line); }
+.aic-chip.on { color: var(--green-hi); background: var(--ok-bg);
+  border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+.aic-chip.offline { color: var(--green-hi); }
+.aic-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 16px; }
+.aic-actions .pbtn { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px 8px; }
+
+/* ── Home style sheet (long-press home › Style) ── */
+.style-sheet { width: 320px; max-width: 88vw; text-align: left; }
+.ss-lbl { font-family: var(--mono); font-size: 10px; letter-spacing: .13em; text-transform: uppercase;
+  color: var(--text-2); margin: 15px 0 8px; }
+.ss-swatches { display: flex; gap: 10px; flex-wrap: wrap; }
+.ss-sw { width: 34px; height: 34px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center; color: #04121A;
+  background: radial-gradient(120% 120% at 30% 20%, color-mix(in srgb, var(--sw) 70%, #fff), var(--sw) 62%);
+  border: 2px solid transparent; transition: transform .2s var(--spring), box-shadow .2s; }
+.ss-sw:active { transform: scale(.92); }
+.ss-sw.on { border-color: rgba(255, 255, 255, .9);
+  box-shadow: 0 0 0 2px var(--sw), 0 0 16px -2px var(--sw); }
+.ss-seg { display: flex; width: 100%; }
+.ss-seg button { flex: 1; text-align: center; }
+.ss-fx { display: flex; flex-wrap: wrap; gap: 7px; }
+.ss-fxc { padding: 7px 12px; border-radius: 999px; font-size: 12px; color: var(--text-2);
+  background: rgba(255, 255, 255, .04); border: 1px solid var(--line); transition: color .15s, border-color .15s; }
+.ss-fxc.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.ss-row { width: 100%; display: flex; align-items: center; justify-content: space-between;
+  margin-top: 14px; padding: 10px 2px 0; font-size: 13.5px; color: var(--text-0);
+  border-top: 1px solid var(--line); }
+.ss-row + .ss-row { margin-top: 8px; }
+.ss-sub { display: block; font-size: 10.5px; color: var(--text-2); margin-top: 2px; }
+.ss-btns { display: flex; gap: 8px; margin-top: 16px; }
+.ss-btns .pbtn { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; }
