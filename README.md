@@ -1,6 +1,10 @@
 <div align="center">
 
-<img width="476" height="904" alt="image" src="https://github.com/user-attachments/assets/35fb033d-d0f4-44cf-8a6e-88a5b8307466" />
+<img width="218" height="426" alt="image" src="https://github.com/user-attachments/assets/d44c92e1-d3a5-468c-8de4-1c6e98481f94" />
+<img width="218" height="426" alt="image" src="https://github.com/user-attachments/assets/45a5eebf-8410-41f5-b35e-2ebe0c363f53" />
+<img width="218" height="426" alt="image" src="https://github.com/user-attachments/assets/db2832a6-5675-4272-840a-fbdfc71fe978" />
+<img width="218" height="426" alt="image" src="https://github.com/user-attachments/assets/fb619cd2-c97a-4f72-94b7-0eeec83f250a" />
+
 
 # AuraOS
 
