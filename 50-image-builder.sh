@@ -142,6 +142,8 @@ rsync -aHAX --info=progress2 \
   --exclude=/mnt      \
   --exclude=/aura \
   --exclude=/usr/bin/qemu-aarch64-static \
+  --exclude=/var/cache/apt/archives/*.deb \
+  --exclude=/var/lib/apt/lists/*_Packages \
   "$ROOTFS/" "$ROOT_MNT/"
 
 # Re-create required empty mount points that rsync --exclude skipped

@@ -21,9 +21,12 @@ apt-get update -qq
 #   for the detected board (bcm2711 for RPi 4, bcm2712 for RPi 5).
 #   We're building for RPi 5 specifically.
 # linux-firmware-raspi: RPi-specific blobs — VideoCore, CYW43455 WiFi/BT.
-apt-get install -y --no-install-recommends \
-  linux-raspi \
-  linux-firmware-raspi
+#   Ubuntu ships this on its preinstalled Pi images, but it isn't in the plain
+#   ports archive, so fall back to the general linux-firmware (which carries the
+#   Broadcom/CYW43455 blobs). linux-raspi (the kernel) stays mandatory.
+apt-get install -y --no-install-recommends linux-raspi
+apt-get install -y --no-install-recommends linux-firmware-raspi 2>/dev/null \
+  || apt-get install -y --no-install-recommends linux-firmware
 
 # ─── WIRELESS ────────────────────────────────────────────────────────────────
 # RPi 5 uses a CYW43455 (WiFi 5, BT 5.0) chip; its firmware is in
@@ -50,7 +53,7 @@ apt-get install -y --no-install-recommends \
 apt-get install -y --no-install-recommends \
   mesa-utils \
   libgl1-mesa-dri \
-  libgles2-mesa \
+  libgles2 \
   libdrm2
 
 # ─── HARDWARE INTERFACES ─────────────────────────────────────────────────────
@@ -101,7 +104,7 @@ if dpkg -l cloud-init &>/dev/null 2>&1; then
   apt-get purge -y --auto-remove cloud-init
 fi
 # Belt-and-suspenders: disable even if removal fails (e.g., it's depended on)
-mkdir -p /etc/cloud
+mkdir -p /etc/cloud/cloud.cfg.d
 echo '# AuraOS: cloud-init disabled' > /etc/cloud/cloud.cfg.d/99-disabled.cfg
 
 # ─── ENABLE SERVICES ─────────────────────────────────────────────────────────

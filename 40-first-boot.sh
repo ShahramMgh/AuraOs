@@ -166,6 +166,28 @@ apt-get install -y --no-install-recommends cryptsetup-initramfs
 grep -q "^CRYPTSETUP=y" /etc/cryptsetup-initramfs/conf-hook 2>/dev/null || \
   echo "CRYPTSETUP=y" >> /etc/cryptsetup-initramfs/conf-hook
 
+# ─── GENERATE INITRAMFS ──────────────────────────────────────────────────────
+# The kernel postinst only *defers* initramfs creation inside the build chroot,
+# leaving /boot/initrd.img a dangling symlink and no real initrd. Without it the
+# image can't unlock LUKS (or even load the mmc/ext4 modules) and won't boot, so
+# generate it explicitly now — with the cryptsetup hooks installed just above
+# baked in. Hard-fail if nothing is produced, rather than ship an unbootable img.
+KERNEL_VER="$(cd /boot && ls vmlinuz-*-raspi 2>/dev/null | sed 's/vmlinuz-//' | sort -V | tail -1)"
+if [[ -n "$KERNEL_VER" ]]; then
+  echo "Generating initramfs for $KERNEL_VER (LUKS unlock + boot modules)…"
+  if [[ -f "/boot/initrd.img-$KERNEL_VER" ]]; then
+    update-initramfs -u -k "$KERNEL_VER"
+  else
+    update-initramfs -c -k "$KERNEL_VER"
+  fi
+  if [[ -f "/boot/initrd.img-$KERNEL_VER" ]]; then
+    echo "  initrd.img-$KERNEL_VER generated ($(du -h "/boot/initrd.img-$KERNEL_VER" | cut -f1))"
+  else
+    echo "ERROR: initramfs generation produced no initrd for $KERNEL_VER" >&2
+    exit 1
+  fi
+fi
+
 # ─── SUMMARY ─────────────────────────────────────────────────────────────────
 echo
 echo "First-boot configuration complete."
@@ -173,4 +195,9 @@ echo "  User:     $USERNAME  (password expires on first login)"
 echo "  Hostname: aura / aura.local"
 echo "  SSH:      enabled, root login disabled"
 echo "  LUKS:     cryptsetup-initramfs installed"
-[[ -n "${WIFI_SSID:-}" ]] && echo "  WiFi:     ${WIFI_SSID} pre-configured"
+# Use a full `if` (not `test && echo`): as the script's last command, a bare
+# `&&` whose test fails would make the whole script exit non-zero and abort the
+# build, even though first-boot config succeeded.
+if [[ -n "${WIFI_SSID:-}" ]]; then
+  echo "  WiFi:     ${WIFI_SSID} pre-configured"
+fi

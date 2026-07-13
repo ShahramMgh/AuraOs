@@ -9,6 +9,18 @@ export DEBIAN_FRONTEND=noninteractive
 
 apt-get update -qq
 
+# --- Repair/prevent the `click` postinst trap --------------------------
+# The lomiri stack (step 2) pulls in `click`, whose postinst runs
+# `dpkg-architecture` — a tool from dpkg-dev that a minbase rootfs lacks, so it
+# dies and leaves click half-configured. Once that happens EVERY later apt call
+# (including the ones just below) fails trying to reconfigure click. Install
+# dpkg-dev as the very first apt action: apt unpacks its files before it
+# configures anything, so a click left half-configured by an interrupted build
+# is repaired in the same transaction, and a fresh build never hits the trap.
+dpkg --configure -a 2>/dev/null || true
+apt-get install -y --no-install-recommends dpkg-dev || apt-get install -y -f
+dpkg --configure -a 2>/dev/null || true
+
 # --- Sandboxing & mandatory access control -----------------------------
 # apparmor: kernel-level mandatory access control, confines what each
 #   process/app can touch regardless of user permissions
@@ -24,9 +36,15 @@ apt-get install -y --no-install-recommends \
 # wireguard-tools: for optional self-hosted VPN / relay, no third-party VPN
 #   company required
 apt-get install -y --no-install-recommends ufw wireguard-tools
-ufw --force default deny incoming
-ufw --force default allow outgoing
-ufw --force enable
+# Configure ufw through its config files, not the live CLI. `ufw enable`
+# shells out to iptables, which can't run under qemu-user emulation during
+# the arm64 cross-build ("ERROR: Couldn't determine iptables version").
+# Writing the config directly makes ufw come up enforcing on the first boot
+# on real Pi hardware, where iptables runs natively.
+sed -i 's/^DEFAULT_INPUT_POLICY=.*/DEFAULT_INPUT_POLICY="DROP"/'     /etc/default/ufw
+sed -i 's/^DEFAULT_OUTPUT_POLICY=.*/DEFAULT_OUTPUT_POLICY="ACCEPT"/' /etc/default/ufw
+sed -i 's/^ENABLED=.*/ENABLED=yes/' /etc/ufw/ufw.conf
+systemctl enable ufw >/dev/null 2>&1 || true
 
 # --- Storage ---------------------------------------------------------------
 # cryptsetup: LUKS2 full-disk encryption (kernel-native, hardware accel)
