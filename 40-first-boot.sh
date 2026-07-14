@@ -15,6 +15,11 @@ export DEBIAN_FRONTEND=noninteractive
 
 USERNAME="aura"
 
+# sudo isn't in the minbase rootfs, so adding aura to the `sudo` group below is
+# meaningless without it — the device has no way to escalate (verified on Pi 5).
+# Install it so the OS is actually administrable.
+apt-get install -y --no-install-recommends sudo
+
 # ─── USER ────────────────────────────────────────────────────────────────────
 if ! id "$USERNAME" &>/dev/null; then
   useradd -m -s /bin/bash \
@@ -72,8 +77,10 @@ fi
 # window (the user must change the password before doing anything sensitive).
 # After first login, the user should add their public key and set
 # PasswordAuthentication no.
-cat >> /etc/ssh/sshd_config << 'EOF'
-
+# Write to a conf.d drop-in (idempotent) rather than appending to sshd_config —
+# a `cat >>` re-runs on every build and stacks duplicate blocks.
+mkdir -p /etc/ssh/sshd_config.d
+cat > /etc/ssh/sshd_config.d/10-aura-hardening.conf << 'EOF'
 # AuraOS hardening
 PermitRootLogin no
 X11Forwarding no
@@ -82,6 +89,29 @@ LoginGraceTime 20
 EOF
 
 systemctl enable ssh 2>/dev/null || true
+
+# ─── WIRED ETHERNET (DHCP) ───────────────────────────────────────────────────
+# Ubuntu's NetworkManager ships 10-globally-managed-devices.conf telling NM to
+# manage ONLY wifi/cellular and IGNORE wired ethernet (it expects netplan or
+# networkd to handle it). This minbase has neither a netplan config nor
+# networkd enabled, so the wired port never gets an IP — the device is dead on
+# the network even with a cable plugged in. Write a netplan config that DHCPs
+# every ethernet via NetworkManager (so the shell's nmcli indicator still sees
+# it). netplan's boot-time generator also flips NM to manage these interfaces.
+mkdir -p /etc/netplan
+cat > /etc/netplan/01-ethernet.yaml << 'EOF'
+network:
+  version: 2
+  renderer: NetworkManager
+  ethernets:
+    all-ethernet:
+      match:
+        name: "e*"
+      dhcp4: true
+      dhcp6: true
+      optional: true
+EOF
+chmod 600 /etc/netplan/01-ethernet.yaml
 
 # ─── WIFI PRE-SEED ───────────────────────────────────────────────────────────
 # If build.sh was invoked with --wifi SSID:password, write a NetworkManager

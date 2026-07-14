@@ -22,3 +22,6 @@ __pycache__/
 # OS cruft
 .DS_Store
 Thumbs.db
+
+# wget cruft
+wget-log*

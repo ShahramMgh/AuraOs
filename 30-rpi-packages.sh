@@ -29,14 +29,30 @@ apt-get install -y --no-install-recommends linux-firmware-raspi 2>/dev/null \
   || apt-get install -y --no-install-recommends linux-firmware
 
 # ─── WIRELESS ────────────────────────────────────────────────────────────────
-# RPi 5 uses a CYW43455 (WiFi 5, BT 5.0) chip; its firmware is in
-# linux-firmware-raspi.  NetworkManager is required by the Lomiri shell's
-# connectivity indicator.
+# RPi 5 uses a CYW43455 (BCM4345/6) WiFi 5 / BT 5.0 chip.
+# NetworkManager is required by the shell's connectivity indicator.
 apt-get install -y --no-install-recommends \
   network-manager \
   wpasupplicant \
   iw \
   wireless-tools
+
+# Pi 5 WiFi firmware (NVRAM). linux-firmware-raspi isn't in the ports archive and
+# the generic linux-firmware lacks the Pi-5 board NVRAM, so brcmfmac loads but the
+# chip never inits — no wlan interface at all (verified on Pi 5 hardware). Fetch
+# the board NVRAM from the Raspberry Pi firmware repo. The board-specific file is
+# a symlink to the generic name, so we install brcmfmac43455-sdio.txt directly.
+apt-get install -y --no-install-recommends curl ca-certificates
+BRCM=/lib/firmware/brcm
+mkdir -p "$BRCM"
+if [ ! -s "$BRCM/brcmfmac43455-sdio.txt" ]; then
+  if curl -fsSL -o "$BRCM/brcmfmac43455-sdio.txt" \
+       "https://raw.githubusercontent.com/RPi-Distro/firmware-nonfree/trixie/debian/added-firmware/brcm/brcmfmac43455-sdio.txt"; then
+    echo "Pi 5 WiFi NVRAM installed ($(stat -c%s "$BRCM/brcmfmac43455-sdio.txt") bytes)."
+  else
+    echo "WARNING: could not fetch Pi 5 WiFi NVRAM (no network in chroot?) — WiFi may not work." >&2
+  fi
+fi
 
 # ─── BLUETOOTH ───────────────────────────────────────────────────────────────
 apt-get install -y --no-install-recommends \

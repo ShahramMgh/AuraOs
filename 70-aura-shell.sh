@@ -94,12 +94,16 @@ elif command -v chromium-browser >/dev/null 2>&1; then
     --no-first-run --disable-translate --overscroll-history-navigation=0
 elif command -v epiphany-browser >/dev/null 2>&1; then
   # WebKitGTK (GNOME Web) — the deb-installable engine on Ubuntu 24.04+.
-  # --application-mode gives minimal chrome but REQUIRES a --profile dir; it
-  # also needs a session bus + gsettings, which cage's session normally has
-  # (we spin one up if not). Not as bare as cog, but renders fullscreen.
+  # --application-mode is chromeless, but epiphany REQUIRES the profile dir to be
+  # named with the web-app prefix and contain an .app marker, or it aborts with
+  # "does not begin with required web app prefix" / "Failed to get GApplication
+  # ID" and the whole session dies (verified on Pi 5 hardware). Not as bare as
+  # cog, but renders fullscreen with no browser chrome.
   export GTK_A11Y=none
-  PROFILE="${XDG_DATA_HOME:-$HOME/.local/share}/aura-epiphany"
+  APPID="org.gnome.Epiphany.WebApp_aura"
+  PROFILE="${XDG_DATA_HOME:-$HOME/.local/share}/$APPID"
   mkdir -p "$PROFILE"
+  : > "$PROFILE/.app"
   if command -v dbus-run-session >/dev/null 2>&1 && [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ]; then
     exec dbus-run-session -- epiphany-browser --application-mode --profile="$PROFILE" "$URL"
   fi
