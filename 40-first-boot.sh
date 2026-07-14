@@ -23,8 +23,11 @@ if ! id "$USERNAME" &>/dev/null; then
 fi
 
 echo "${USERNAME}:aura" | chpasswd
-# Force password change on first interactive login
-passwd -e "$USERNAME"
+# NOTE: we deliberately do NOT `passwd -e` here. An expired password makes PAM
+# demand a change at login, which blocks lightdm's auto-login — on a keyboard-
+# less touch device that deadlocks at a greeter with no on-screen keyboard.
+# Credential/security setup belongs in the shell's first-run onboarding, not a
+# greeter. (Default password stays `aura` for SSH until onboarding lands.)
 
 # sudo access comes from the `sudo` group membership set above (useradd -G),
 # same as a normal Ubuntu install — sudo asks for the user's own password,
