@@ -160,15 +160,22 @@ Type=Application
 DesktopNames=Aura
 EOF
 
-# ─── MAKE IT THE DEFAULT SESSION ─────────────────────────────────────────────
-# Step 4 (first-boot) pointed lightdm autologin at lomiri-touch; override it to
-# our shell. Lomiri stays installed as a fallback session you can pick manually.
-if [ -f /etc/lightdm/lightdm.conf ]; then
-  sed -i 's/^autologin-session=.*/autologin-session=aura-shell/' /etc/lightdm/lightdm.conf || true
-  sed -i 's/^user-session=.*/user-session=aura-shell/' /etc/lightdm/lightdm.conf || true
-  grep -q '^autologin-session=' /etc/lightdm/lightdm.conf || \
-    sed -i '/\[Seat:\*\]/a autologin-session=aura-shell' /etc/lightdm/lightdm.conf || true
-fi
+# ─── MAKE IT THE DEFAULT SESSION + AUTO-LOGIN ────────────────────────────────
+# Configure lightdm to auto-login the aura user straight into the Aura Shell.
+# CRITICAL: noble's lightdm ships NO monolithic /etc/lightdm/lightdm.conf — only
+# conf.d drop-ins — so the earlier `sed -i .../lightdm.conf` edits were silent
+# no-ops and the device landed on a keyboard-less greeter. Write a drop-in
+# instead, and number it 99- so it overrides the packaged
+# 90-default-session-lomiri.conf (drop-ins load lexically; last one wins).
+# Lomiri stays installed as a fallback session, selectable from a greeter.
+install -d /etc/lightdm/lightdm.conf.d
+cat > /etc/lightdm/lightdm.conf.d/99-aura-autologin.conf << 'EOF'
+[Seat:*]
+autologin-user=aura
+autologin-user-timeout=0
+autologin-session=aura-shell
+user-session=aura-shell
+EOF
 
 # ─── ENABLE ──────────────────────────────────────────────────────────────────
 systemctl enable aura-agent.service 2>/dev/null || true
