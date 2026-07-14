@@ -255,6 +255,10 @@ cat > "$BOOT_MNT/config.txt" << 'EOF'
 # BCM2712 specific — RPi 5 only reads this section
 kernel=kernel_2712.img
 arm_64bit=1
+# Load the initramfs into RAM right after the kernel. Without this the firmware
+# never loads initrd.img, and the modular raspi kernel can't mount root (the
+# mmc/ext4 drivers live in the initrd) — it hangs at a blank blinking cursor.
+initramfs initrd.img followkernel
 
 # VC7 KMS driver for Wayland/Mir (required by Lomiri compositor)
 dtoverlay=vc4-kms-v3d
@@ -274,6 +278,7 @@ display_auto_detect=1
 # Fallback for RPi 4 (same image, different board)
 kernel=kernel8.img
 arm_64bit=1
+initramfs initrd.img followkernel
 dtoverlay=vc4-kms-v3d
 max_framebuffers=2
 enable_uart=1
@@ -297,8 +302,11 @@ else
   CRYPT_ARGS=""
 fi
 
+# No 'quiet splash' during bring-up: we want kernel + systemd messages visible
+# on HDMI (tty1) and serial so a boot that stalls tells us where. Add them back
+# for a polished production image once boot is confirmed on hardware.
 printf '%s\n' \
-  "console=serial0,115200 console=tty1 ${ROOT_ARG} rootfstype=ext4 fsck.repair=yes rootwait ${CRYPT_ARGS} quiet splash" \
+  "console=serial0,115200 console=tty1 ${ROOT_ARG} rootfstype=ext4 fsck.repair=yes rootwait ${CRYPT_ARGS}" \
   | tr -s ' ' \
   > "$BOOT_MNT/cmdline.txt"
 

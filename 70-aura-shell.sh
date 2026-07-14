@@ -174,6 +174,19 @@ fi
 systemctl enable aura-agent.service 2>/dev/null || true
 systemctl enable lightdm 2>/dev/null || true
 
+# `systemctl enable` under qemu emulation only half-applies: it writes the
+# display-manager.service alias but often NOT the graphical.target.wants symlink
+# that actually starts lightdm at boot — so the Pi reaches graphical.target and
+# sits at a text console with no shell. Wire both up explicitly, and make sure
+# graphical.target is the default so lightdm is reached at all.
+LIGHTDM_UNIT="$(ls /lib/systemd/system/lightdm.service /usr/lib/systemd/system/lightdm.service 2>/dev/null | head -1)"
+if [ -n "$LIGHTDM_UNIT" ]; then
+  mkdir -p /etc/systemd/system/graphical.target.wants
+  ln -sf "$LIGHTDM_UNIT" /etc/systemd/system/graphical.target.wants/lightdm.service
+  ln -sf "$LIGHTDM_UNIT" /etc/systemd/system/display-manager.service
+fi
+ln -sf /lib/systemd/system/graphical.target /etc/systemd/system/default.target
+
 echo
 echo "Aura Shell v1.0 installed as the default session."
 echo "  Shell:  ${OPT}/shell   (served by the agent on 127.0.0.1:8787)"
