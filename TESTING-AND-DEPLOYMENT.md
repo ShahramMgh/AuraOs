@@ -53,5 +53,9 @@ This is where you actually see **Aura Shell** render in its real session and get
 | `aura-agent.py` reads real `nmcli`/`/sys` state and serves the shell | **Verified live**, this session |
 | Local API is authenticated — every `/api/*` (incl. `/api/exec`, `/api/files/*`) refuses an unauthenticated caller (401); the shell works with the injected per-boot token | **Verified live**, this session — `curl` + headless Firefox; regression `tests/test_auth.py` (10 checks). *Same-user scrape still open until app sandboxing (blueprint 6.3.1)* |
 | The resident composes multi-step plans from one capability catalog, learns routines, and offers proactive suggestions | **Verified live**, this session — engine via `curl`, flows in headless Firefox (sim); *not on hardware; episode log not yet Vault-encrypted* |
-| Shell renders inside the real cage kiosk session (WebKitGTK on 24.04+) on a GPU/display | **Not yet verified** — needs Tier 2/3 (`./try-shell.sh --kiosk`); no display in this sandbox |
-| Pi 5-specific GPU/touch/power behavior | **Not yet verified** — needs Tier 3, real hardware |
+| Image builds → flashes → boots on a real Pi 5 (kernel + initramfs + root mount + systemd + lightdm auto-login) | **Verified on hardware** (2026-07-14) — after fixing initramfs generation, `config.txt` `initramfs`, cmdline, auto-login drop-in, graphical-target wiring |
+| Shell renders inside the real cage kiosk session (WebKitGTK/epiphany) on the Pi 5 display | **Verified on hardware** (2026-07-14) — chromeless once the epiphany web-app profile crash was fixed; agent serves the shell and reads real Pi 5 state |
+| WiFi (CYW43455) and Ethernet on the Pi 5 | **Verified on hardware** (2026-07-14) — Ethernet via netplan; WiFi needs the Pi 5 board NVRAM (`brcmfmac43455-sdio.txt`), now fetched at build time |
+| On-screen keyboard under the `cage` kiosk | **Does not work** — cage exposes no `layer-shell`/`input-method`, so no OSK can display. Drives the open question of a native shell |
+| Pi 5-specific GPU hardware-accel, touchscreen digitizer, power/thermal | **Not yet verified** — rendered fine with mouse + HDMI, but hw-accel (v3d vs llvmpipe), touch, and power headroom still need a real touch panel + supply |
+| LUKS unlock on the Pi 5 | **Not yet verified** — bring-up images built `--no-encrypt`; cmdline `cryptopts=` + crypttab-in-initrd path still incomplete |

@@ -449,3 +449,14 @@ and the loop is verified in sim + a local live run, not yet on hardware.
   (roadmap item 4 in `ARCHITECTURE.md`) is the next step to make it airtight.
 - PIN unlock is delegated to the greeter/PAM in production; the agent endpoint is
   a placeholder that should be wired to real auth before shipping.
+- **No on-screen keyboard under the cage kiosk.** `cage` is a strict single-app
+  kiosk compositor — it exposes neither `layer-shell` (so an OSK can't paint over
+  the app) nor `input-method` (so it can't know a text field is focused). A
+  touch-only device therefore has no way to type. Fixing it means either an
+  in-shell (web) keyboard or moving to a compositor that supports those
+  protocols — this is the open item behind the web-vs-native shell decision.
+- **Shell engine is epiphany (a browser), not the intended WPE `cog`.** Ubuntu
+  dropped WPE after 22.04, so on 24.04 the shell renders in epiphany's
+  `--application-mode` (chromeless, but still a browser engine). It boots and
+  renders on real Pi 5 hardware (2026-07-14), but the "web-tech shell" nature is
+  a live design question — a native shell is under consideration.

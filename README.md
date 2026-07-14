@@ -179,10 +179,23 @@ progress** — the native intelligence layer's foundation is built and enforces
 every non-negotiable in the manifest; making the assistant *act* under consent
 is next.
 
-**Not yet tested on real hardware.** Everything above is verified in the
-browser preview, the test suite, and on Ubuntu 24.04 hosts — a Pi 5 flash-and-
-boot pass is still ahead, so treat every hardware claim as designed-for, not
-proven-on.
+**First real Pi 5 boot: done (2026-07-14).** The image builds, flashes, and
+boots on actual Raspberry Pi 5 hardware — kernel + initramfs + root mount +
+systemd + lightdm auto-login into the shell, which renders and reads real device
+state through the agent. **WiFi** (CYW43455, once the board firmware is in place)
+and **Ethernet** both work. Getting here shook out and fixed a chain of real
+bring-up bugs (initramfs generation, `config.txt`/cmdline, auto-login config,
+netplan wired networking, Pi 5 WiFi firmware, missing `sudo`) — all now in the
+build.
+
+**Still unproven on hardware / open:** LUKS unlock (current images are built
+`--no-encrypt` for bring-up), touchscreen digitizer (validated with a
+mouse + HDMI, not touch), GPU hardware-acceleration confirmation, on-screen
+keyboard (does not work under the current `cage` kiosk — see below), and
+Waydroid / the AI engine / the modem on real hardware. There is also an **open
+design decision** about the shell: the current Aura Shell is web-technology
+rendered fullscreen; a native shell is under consideration. Treat those as
+designed-for, not proven-on.
 
 Known rough edges are tracked honestly at the bottom of
 [`SHELL.md`](SHELL.md).
